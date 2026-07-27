@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>红利低波决策台</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i data-lucide="chart-candlestick"></i></span>
+        <div class="brand-copy">
+          <strong>红利低波决策台</strong>
+          <span>H30269 · V3.1</span>
+        </div>
+      </div>
+
+      <nav class="tabs" aria-label="主导航">
+        <button class="tab active" data-tab="overview">决策台</button>
+        <button class="tab" data-tab="history">历史记录</button>
+      </nav>
+
+      <div class="top-actions">
+        <div class="market-state">
+          <span id="marketDot" class="state-dot"></span>
+          <span id="asOfText">读取中</span>
+        </div>
+        <button id="refreshButton" class="icon-button" title="刷新全部数据" aria-label="刷新全部数据">
+          <i data-lucide="refresh-cw"></i>
+        </button>
+      </div>
+    </header>
+
+    <div id="errorBanner" class="error-banner" hidden>
+      <i data-lucide="triangle-alert"></i>
+      <span id="errorText"></span>
+    </div>
+
+    <main id="overviewView" class="overview-view view active">
+      <section class="decision-bar" aria-label="今日决策摘要">
+        <div class="decision-bar-item primary">
+          <i data-lucide="triangle-alert"></i>
+          <div><span>当前状态</span><strong id="signalStateText">正在计算</strong></div>
+        </div>
+        <div class="decision-bar-item">
+          <i data-lucide="shield-check"></i>
+          <div><span>核心仓</span><strong id="topCoreAction">--</strong></div>
+        </div>
+        <div class="decision-bar-item">
+          <i data-lucide="clock-3"></i>
+          <div><span>执行状态</span><strong id="topTiming">--</strong></div>
+        </div>
+        <div class="decision-bar-item emphasis">
+          <i data-lucide="git-compare-arrows"></i>
+          <div><span>Beta调整后40日差</span><strong id="topRelative">--</strong></div>
+        </div>
+        <div class="decision-bar-item confirmation">
+          <i data-lucide="calendar-check-2"></i>
+          <div><span>收盘确认</span><strong id="topConfirm">--</strong></div>
+        </div>
+      </section>
+
+      <section class="evidence-strip" aria-label="关键市场证据">
+        <div class="evidence-item target"><span>红利低波 40日</span><strong id="targetReturnInline">--</strong></div>
+        <div class="evidence-item benchmark"><span>中证全指 40日</span><strong id="benchmarkReturnInline">--</strong></div>
+        <div class="evidence-item hot"><span>Beta调整后差</span><strong id="relativeValue">--</strong><em id="relativeZone">--</em></div>
+        <div class="evidence-item beta"><span>5年滚动 Beta</span><strong id="betaValue">--</strong><em id="betaState">--</em></div>
+        <div class="evidence-item"><span>MA250 偏离</span><strong id="yearDistance">--</strong><em id="yearPosition">--</em></div>
+        <div class="evidence-item"><span>股债利差</span><strong id="bondSpreadValue">--</strong><em id="bondSupport">--</em></div>
+      </section>
+
+      <section class="market-stage">
+        <div class="chart-stage">
+          <div class="stage-head">
+            <div>
+              <span class="section-label">主视觉 · 趋势与位置</span>
+              <h1>H30269 日K与均线</h1>
+            </div>
+            <div class="trend-actions">
+              <div class="segmented chart-mode-control" role="group" aria-label="图表模式">
+                <button class="active" data-chart-mode="candles">K线</button>
+                <button data-chart-mode="line">收盘</button>
+              </div>
+              <div class="segmented range-control" role="group" aria-label="图表范围">
+                <button data-range="66">3月</button>
+                <button class="active" data-range="132">6月</button>
+                <button data-range="260">1年</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="price-summary">
+            <div class="latest-price">
+              <span>最新点位</span>
+              <strong id="closeValue">--</strong>
+              <em id="closeDate">--</em>
+            </div>
+            <div class="ohlc-readout" aria-label="K线行情">
+              <span>开 <b id="openValue">--</b></span>
+              <span>高 <b id="highValue">--</b></span>
+              <span>低 <b id="lowValue">--</b></span>
+              <span>收 <b id="ohlcCloseValue">--</b></span>
+              <span>涨跌 <b id="changeValue">--</b></span>
+            </div>
+            <div class="chart-legend" aria-label="均线图例">
+              <span class="legend-item candle-legend"><i></i><i></i>红涨绿跌</span>
+              <span class="legend-item"><i class="legend-line line-ma20"></i>MA20</span>
+              <span class="legend-item"><i class="legend-line line-ma60"></i>MA60</span>
+              <span class="legend-item"><i class="legend-line line-ma250"></i>MA250</span>
+            </div>
+          </div>
+
+          <div class="chart-wrap">
+            <div id="priceChart" class="kline-chart" role="img" aria-label="H30269日K与均线图"></div>
+          </div>
+
+          <div id="maRuler" class="ma-ruler" aria-label="全部均线位置">
+            <div class="ma-item"><span>MA20</span><strong id="ma20Value">--</strong><em id="ma20State">--</em></div>
+            <div class="ma-item"><span>MA30</span><strong id="ma30Value">--</strong><em id="ma30State">--</em></div>
+            <div class="ma-item"><span>MA60</span><strong id="ma60Value">--</strong><em id="ma60State">--</em></div>
+            <div class="ma-item"><span>MA120</span><strong id="ma120Value">--</strong><em id="ma120State">--</em></div>
+            <div class="ma-item"><span>MA250</span><strong id="ma250Value">--</strong><em id="ma250State">--</em></div>
+          </div>
+        </div>
+
+        <aside id="signalPanel" class="action-rail tone-wait">
+          <div class="rail-head">
+            <div>
+              <span>今日动作</span>
+              <strong id="quoteStatus">--</strong>
+            </div>
+            <span id="confidenceBadge" class="confidence-badge">置信度 --</span>
+          </div>
+
+          <div class="rail-decision">
+            <span class="rail-index">01</span>
+            <h2 id="decisionText">正在计算</h2>
+            <p id="decisionReason">等待最新数据返回</p>
+          </div>
+
+          <div class="position-control">
+            <span>当前仓位</span>
+            <div class="segmented dark" role="group" aria-label="仓位选择">
+              <button data-position="无仓">无仓</button>
+              <button class="active" data-position="普通仓位">普通</button>
+              <button data-position="重仓">重仓</button>
+            </div>
+          </div>
+
+          <div class="position-action">
+            <i data-lucide="route"></i>
+            <div><span>本次执行</span><p id="positionAdvice">--</p></div>
+          </div>
+
+          <div class="confirmation-block">
+            <div class="confirmation-head">
+              <div><span>连续收盘确认</span><strong id="confirmationCount">--</strong></div>
+              <em id="confirmationLabel">--</em>
+            </div>
+            <div id="confirmationDots" class="confirmation-dots" aria-label="收盘确认进度"></div>
+            <div class="progress-track"><i id="confirmationProgress"></i></div>
+          </div>
+
+          <div id="gateRows" class="gate-rows"></div>
+
+          <div class="first-action">
+            <i data-lucide="crosshair"></i>
+            <div><span>第一档动作</span><strong id="firstActionText">--</strong></div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="decision-chains" aria-label="V3.1执行链">
+        <div class="chain-lane buy-lane">
+          <div class="chain-title"><span>加仓链</span><strong>多窗口低估 → 股债支撑 → 分批执行</strong></div>
+          <div id="buyChain" class="chain-flow"></div>
+        </div>
+        <div class="chain-lane reduce-lane">
+          <div class="chain-title"><span>减仓链</span><strong>Beta过热 → 自身上涨 → 年线确认 → 收盘确认</strong></div>
+          <div id="reduceChain" class="chain-flow"></div>
+        </div>
+      </section>
+
+      <section class="support-grid">
+        <section class="relative-panel support-panel">
+          <div class="section-head">
+            <div>
+              <span class="section-label">辅助证据</span>
+              <h2>40日收益与Beta校正</h2>
+            </div>
+            <div class="segmented relative-range-control" role="group" aria-label="相对收益图范围">
+              <button data-relative-range="22">1月</button>
+              <button class="active" data-relative-range="66">3月</button>
+              <button data-relative-range="132">6月</button>
+            </div>
+          </div>
+          <div class="relative-summary">
+            <div class="target-return"><span>红利低波</span><strong id="targetReturnValue">--</strong></div>
+            <div class="benchmark-return"><span>中证全指</span><strong id="benchmarkReturnValue">--</strong></div>
+            <div class="raw-gap"><span>原始差值</span><strong id="rawGap">--</strong></div>
+            <div class="current-gap"><span>Beta调整后</span><strong id="currentGap">--</strong></div>
+            <span id="relativeBaseDate" class="relative-window">--</span>
+          </div>
+          <div class="beta-audit" aria-label="Beta多窗口稳健性">
+            <div><span>2年 Beta</span><strong id="beta2yValue">--</strong><em id="beta2yAdjusted">--</em></div>
+            <div><span>3年 Beta</span><strong id="beta3yValue">--</strong><em id="beta3yAdjusted">--</em></div>
+            <div><span>5年 Beta</span><strong id="beta5yValue">--</strong><em id="beta5yAdjusted">--</em></div>
+            <div class="beta-verdict"><span>窗口判断</span><strong id="betaConsensus">--</strong><em id="betaBand">--</em></div>
+          </div>
+          <div class="relative-series-legend" aria-label="收益图图例">
+            <span><i class="target-line"></i>红利40日</span>
+            <span><i class="benchmark-line"></i>中证全指40日</span>
+            <span><i class="adjusted-line"></i>Beta调整后差值</span>
+          </div>
+          <div class="relative-chart-wrap"><canvas id="relativeChart"></canvas></div>
+          <div class="threshold-row">
+            <span><i class="threshold-dot buy"></i>≤ -1% 且多窗口一致才买</span>
+            <span><i class="threshold-dot watch"></i>5%~7% 只暂停新增</span>
+            <span><i class="threshold-dot confirm"></i>≥ 7% 还需自身涨幅、年线与2日收盘确认</span>
+          </div>
+        </section>
+
+        <section class="data-panel support-panel">
+          <div class="section-head">
+            <div>
+              <span class="section-label">估值与数据</span>
+              <h2>股债支撑与来源</h2>
+            </div>
+            <span id="qualityBadge" class="quality-badge">--</span>
+          </div>
+          <div class="valuation-equation" aria-label="股债利差计算">
+            <div><span>股息率</span><strong id="dividendYieldValue">--</strong></div>
+            <i>−</i>
+            <div><span>10年国债</span><strong id="bondYieldDetail">--</strong></div>
+            <i>=</i>
+            <div class="equation-result"><span>股债利差</span><strong id="bondSpreadDetail">--</strong></div>
+          </div>
+          <div class="valuation-meta">
+            <span id="equityBondMultiple">--</span>
+            <span id="generatedAtText">--</span>
+          </div>
+          <div id="sourceRows" class="source-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <main id="historyView" class="history-view view">
+      <div class="history-head">
+        <div><span class="section-label">每日留痕</span><h1>历史判定记录</h1></div>
+        <span id="historyCount">0 条记录</span>
+      </div>
+      <div class="history-table-wrap">
+        <table class="history-table">
+          <thead>
+            <tr><th>生成时间</th><th>交易日</th><th>执行建议</th><th>主信号差值</th><th>MA250偏离</th><th>短期趋势</th><th>置信度</th></tr>
+          </thead>
+          <tbody id="historyRows"></tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loading-mark"><i data-lucide="chart-candlestick"></i></div>
+    <span>正在读取最新数据</span>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+  <script src="/static/vendor/lucide.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

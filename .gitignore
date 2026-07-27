@@ -1,0 +1,22 @@
+# Python bytecode and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime data and reports
+cache/
+reports/
+output/
+latest.json
+latest.md
+webapp.pid
+*.log
+
+# Local browser and build artifacts
+.playwright-cli/
+build/
+dist/
+
+# Operating-system files
+.DS_Store
+Thumbs.db

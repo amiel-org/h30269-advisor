@@ -1,0 +1,71 @@
+{
+  "model_version": "V3.1-auto-1.0",
+  "index_code": "H30269",
+  "benchmark_code": "000985",
+  "history_calendar_days": 2600,
+  "use_intraday": true,
+  "cache_max_age_days": 5,
+  "max_market_age_days": 5,
+  "max_fundamental_age_days": 45,
+  "thresholds": {
+    "relative": {
+      "strong_buy_max": -8.0,
+      "add_max": -5.0,
+      "buy_max": -1.0,
+      "hold_min": 0.0,
+      "reduce_min": 5.0,
+      "strong_sell_min": 7.0
+    },
+    "bond": {
+      "strong_spread_min": 3.0,
+      "strong_multiple_min": 2.5,
+      "support_spread_min": 2.0,
+      "support_multiple_min": 2.0,
+      "neutral_spread_min": 1.0,
+      "neutral_multiple_min": 1.5
+    },
+    "sell_confirmation": {
+      "target_40d_return_min": 5.0,
+      "ma250_distance_min": 0.0,
+      "core_ma250_distance_min": 10.0
+    }
+  },
+  "beta": {
+    "primary_window": "5y",
+    "fallback": 0.4,
+    "windows": {
+      "2y": {
+        "trading_days": 484,
+        "minimum_observations": 360
+      },
+      "3y": {
+        "trading_days": 726,
+        "minimum_observations": 500
+      },
+      "5y": {
+        "trading_days": 1210,
+        "minimum_observations": 800
+      }
+    }
+  },
+  "confirmation": {
+    "tactical_overheat_closes": 2,
+    "core_overheat_closes": 5
+  },
+  "execution": {
+    "buy_tranche_pct": 20,
+    "reduce_pct": 5
+  },
+  "fallbacks": {
+    "dividend_yield": {
+      "value_pct": 5.13,
+      "as_of": "2026-06-24",
+      "source_url": "local://V2.2-public-proxy"
+    },
+    "bond_10y": {
+      "value_pct": 1.7454,
+      "as_of": "2026-06-25",
+      "source_url": "local://V2.2-public-proxy"
+    }
+  }
+}
