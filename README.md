@@ -58,7 +58,7 @@ http://127.0.0.1:8765/
 
 源码仓库：<https://github.com/amiel-org/h30269-advisor>
 
-双击 `publish_update.bat`，输入本次更新说明即可提交并推送到 GitHub。Cloudflare Workers Builds 连接 `main` 分支后，每次推送都会自动构建并发布公网版；也可以随时运行 `npm run deploy:cloudflare` 手工发布。
+双击 `publish_update.bat`，输入本次更新说明即可提交并推送到 GitHub。Cloudflare Workers Builds 已连接 `main` 分支，每次推送都会自动构建并发布公网版；也可以随时运行 `npm run deploy:cloudflare` 手工发布。
 运行产生的行情缓存、报告、日志和打包文件已由 `.gitignore` 排除，不会随源码上传。
 
 ## 命令行版
