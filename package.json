@@ -1,0 +1,16 @@
+{
+  "name": "h30269-advisor",
+  "version": "3.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:cloudflare": "node cloudflare/build.mjs",
+    "test:cloudflare": "node --test cloudflare/worker.test.mjs",
+    "check:parity": "node cloudflare/parity.mjs",
+    "dev:cloudflare": "npm run build:cloudflare && wrangler dev",
+    "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.119.0"
+  }
+}

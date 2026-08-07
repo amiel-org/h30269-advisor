@@ -57,6 +57,15 @@ function decisionTone(evaluation) {
   return "wait";
 }
 
+function isBuyAction(evaluation) {
+  return String(evaluation?.action_code || "").startsWith("buy_");
+}
+
+function isSellAction(evaluation) {
+  const code = String(evaluation?.action_code || "");
+  return code.startsWith("reduce_tactical_") || code === "reduce_core_review";
+}
+
 function setText(selector, value) {
   const node = $(selector);
   if (node) node.textContent = value;
@@ -128,6 +137,7 @@ function gateMarkup(gates) {
 function renderGates(metrics, evaluation) {
   const confirmation = normalizeConfirmation(metrics);
   const execution = normalizeExecution(evaluation);
+  const sellExecuted = isSellAction(evaluation) && execution.pct > 0;
   const adjusted = adjustedSpread(metrics);
   const robustOverheat = Boolean(metrics.beta_consensus?.robust_overheat);
   const absoluteGain = metrics.target_40d_return_pct >= 5;
@@ -150,10 +160,10 @@ function renderGates(metrics, evaluation) {
     },
     {
       label: `连续 ${confirmation.required_closes} 个收盘 / 战术仓`,
-      detail: execution.pct > 0
+      detail: sellExecuted
         ? `${confirmation.confirmed_closes}/${confirmation.required_closes} · 本次减 ${execution.pct}%`
         : `${confirmation.confirmed_closes}/${confirmation.required_closes} · 当前不执行`,
-      state: execution.pct > 0 ? "done" : confirmation.confirmed ? "blocked" : "waiting",
+      state: sellExecuted ? "done" : confirmation.confirmed ? "blocked" : "waiting",
     },
   ];
   $("#gateRows").innerHTML = gateMarkup(gates);
@@ -175,7 +185,8 @@ function renderDecisionChains(metrics, evaluation) {
   const adjusted = adjustedSpread(metrics);
   const relativeLow = adjusted <= -1 && Boolean(metrics.beta_consensus?.robust_buy);
   const supportGood = ["股债强支撑", "股债有支撑"].includes(metrics.bond_support);
-  const buyActive = String(evaluation.action_code || "").startsWith("buy_");
+  const buyActive = isBuyAction(evaluation);
+  const sellActive = isSellAction(evaluation);
   const overheat = adjusted >= 7 && Boolean(metrics.beta_consensus?.robust_overheat);
   const absoluteAndMa = metrics.target_40d_return_pct >= 5 && metrics.distance_ma250_pct >= 0;
 
@@ -189,7 +200,7 @@ function renderDecisionChains(metrics, evaluation) {
     { label: "Beta过热", detail: `多窗口 ≥ 7% · 当前 ${percent(adjusted)}`, state: overheat ? "done" : "waiting", icon: "triangle-alert" },
     { label: "自身涨幅 + 年线", detail: absoluteAndMa ? "两项均确认" : `${percent(metrics.target_40d_return_pct)} / ${percent(metrics.distance_ma250_pct)}`, state: absoluteAndMa ? "done" : overheat ? "blocked" : "waiting", icon: "scan-line" },
     { label: `${confirmation.required_closes}日收盘确认`, detail: `${confirmation.confirmed_closes}/${confirmation.required_closes}`, state: confirmation.confirmed ? "done" : "waiting", icon: "calendar-check-2" },
-    { label: "战术仓动作", detail: execution.pct > 0 ? `减 ${execution.pct}%` : execution.planned_pct > 0 ? `确认后减 ${execution.planned_pct}%` : "当前不执行", state: execution.pct > 0 ? "action" : "waiting", icon: "crosshair" },
+    { label: "战术仓动作", detail: sellActive && execution.pct > 0 ? `减 ${execution.pct}%` : adjusted >= 7 && execution.planned_pct > 0 ? `确认后减 ${execution.planned_pct}%` : "当前不执行", state: sellActive && execution.pct > 0 ? "action" : "waiting", icon: "crosshair" },
   ]);
 }
 
@@ -273,10 +284,10 @@ function renderSummary(payload) {
   $("#confirmationProgress").style.width = `${Math.min(100, confirmation.confirmed_closes / confirmation.required_closes * 100)}%`;
 
   let firstAction = "当前无动作";
-  if (execution.pct > 0) firstAction = `${execution.scope}减 ${execution.pct}%`;
+  if (isBuyAction(evaluation) && execution.pct > 0) firstAction = `计划仓位加 ${execution.pct}%`;
+  else if (isSellAction(evaluation) && execution.pct > 0) firstAction = `${execution.scope}减 ${execution.pct}%`;
   else if (evaluation.action_code === "reduce_ready") firstAction = `收盘复核后减 ${execution.planned_pct}%`;
   else if (execution.planned_pct > 0 && adjustedSpread(metrics) >= 7) firstAction = `确认后战术仓减 ${execution.planned_pct}%`;
-  else if (String(evaluation.action_code || "").startsWith("buy_")) firstAction = `计划仓位加 ${execution.pct}%`;
   setText("#firstActionText", firstAction);
 
   renderMovingAverages(metrics);

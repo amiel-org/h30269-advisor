@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "h30269-advisor",
+  "main": "cloudflare/worker.js",
+  "compatibility_date": "2026-08-07",
+  "assets": {
+    "directory": "./cloudflare-dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "kv_namespaces": [
+    {
+      "binding": "H30269_KV",
+      "id": "3056d0fc5aed4b71a79bad31f87ae595"
+    }
+  ],
+  "triggers": {
+    "crons": ["10 7 * * 1-5"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

@@ -16,6 +16,10 @@ webapp.pid
 .playwright-cli/
 build/
 dist/
+cloudflare-dist/
+node_modules/
+.wrangler/
+.dev.vars
 
 # Operating-system files
 .DS_Store

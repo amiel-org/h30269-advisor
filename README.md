@@ -2,7 +2,23 @@
 
 程序自动抓取 `H30269`、中证全指 `000985`、红利低波股息率和中国10年国债收益率，以5年滚动Beta校正40日相对收益，并用2年、3年、5年窗口检查结论稳健性。
 
-## 网页版（推荐）
+## Cloudflare 云端版（推荐）
+
+仓库包含 Cloudflare Worker 云端实现：Worker 负责抓取公开金融数据、执行与本地版一致的 V3.1 规则，并托管原有网页静态资源。云端版支持手工刷新、最近历史记录和交易日收盘后定时刷新。
+
+直接打开：<https://h30269-advisor.anyongliang027.workers.dev>
+
+云端版不需要在本机启动 Python。工作日北京时间 15:10 自动刷新，也可以在网页右上角手工刷新。
+
+```powershell
+npm install
+npm run test:cloudflare
+npm run deploy:cloudflare
+```
+
+Cloudflare 使用 `wrangler.jsonc`，静态资源由 `npm run build:cloudflare` 生成到忽略版本管理的 `cloudflare-dist\`。Python 本地版继续保留，作为离线备用和规则对照基线。
+
+## 本地网页版（离线备用）
 
 双击 `run_webapp.bat`，浏览器会打开：
 
@@ -40,7 +56,9 @@ http://127.0.0.1:8765/
 
 ## GitHub 更新
 
-首次上传完成后，双击 `publish_update.bat`，输入本次更新说明即可提交并推送到 GitHub。
+源码仓库：<https://github.com/amiel-org/h30269-advisor>
+
+双击 `publish_update.bat`，输入本次更新说明即可提交并推送到 GitHub。Cloudflare Workers Builds 连接 `main` 分支后，每次推送都会自动构建并发布公网版；也可以随时运行 `npm run deploy:cloudflare` 手工发布。
 运行产生的行情缓存、报告、日志和打包文件已由 `.gitignore` 排除，不会随源码上传。
 
 ## 命令行版
