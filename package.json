@@ -1,6 +1,6 @@
 {
-  "name": "h30269-advisor",
-  "version": "3.1.0",
+  "name": "h30269-hs300",
+  "version": "4.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,9 @@
     "test:cloudflare": "node --test cloudflare/worker.test.mjs",
     "check:parity": "node cloudflare/parity.mjs",
     "dev:cloudflare": "npm run build:cloudflare && wrangler dev",
-    "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy"
+    "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",
+    "test:hs300": "node cloudflare/hs300-parity.mjs",
+    "test:all": "npm run test:cloudflare && node cloudflare/parity.mjs && node cloudflare/hs300-parity.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.119.0"

@@ -9,10 +9,13 @@ const output = join(root, "cloudflare-dist");
 rmSync(output, { recursive: true, force: true });
 mkdirSync(join(output, "static"), { recursive: true });
 
+// Every top-level *.html becomes a page at the site root (index.html, hs300.html),
+// everything else goes under /static so existing asset URLs keep working.
 for (const entry of readdirSync(source, { withFileTypes: true })) {
   const sourcePath = join(source, entry.name);
-  const targetPath = entry.name === "index.html"
-    ? join(output, "index.html")
+  const isPage = entry.isFile() && entry.name.endsWith(".html");
+  const targetPath = isPage
+    ? join(output, entry.name)
     : join(output, "static", entry.name);
   cpSync(sourcePath, targetPath, { recursive: entry.isDirectory() });
 }

@@ -24,3 +24,12 @@ node_modules/
 # Operating-system files
 .DS_Store
 Thumbs.db
+
+
+# HS300: snapshot + parity baseline MUST be tracked (used by parity test)
+!raw_data.json
+!hs300/reports/
+!hs300/reports/parity_expected.json
+!hs300/reports/results.json
+!hs300/reports/triggers.json
+!hs300/reports/sensitivity.json

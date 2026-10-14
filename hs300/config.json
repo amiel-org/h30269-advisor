@@ -1,0 +1,54 @@
+{
+  "version": "v2.0",
+  "as_of": "2026-10-14",
+
+  "data": {
+    "price_index": "000300",
+    "total_return_index": "H00300",
+    "etf_hint": ["510300", "159919"],
+    "pe_field": "peg",
+    "bond_tenor": "10Y",
+    "bond_forward_fill_from_past_only": true
+  },
+
+  "indicators": {
+    "pe_percentile":  { "window": "expanding", "min_obs": 700, "include_current": false },
+    "erp": {
+      "formula": "100/PE - bond_10y_yield_pct",
+      "direction": "higher_means_cheaper"
+    },
+    "erp_percentile": { "window": "expanding", "min_obs": 700, "include_current": false }
+  },
+
+  "allocation": {
+    "grid": 0.125,
+    "pe_ladder": [
+      { "min_pct": 70, "exposure": 0.0   },
+      { "min_pct": 60, "exposure": 0.125 },
+      { "min_pct": 50, "exposure": 0.375 },
+      { "min_pct": 40, "exposure": 0.625 },
+      { "min_pct": 30, "exposure": 0.875 },
+      { "min_pct": 0,  "exposure": 1.0   }
+    ],
+    "erp_gate": { "lo": 30, "hi": 70, "quantize": "floor" },
+    "combine": "min",
+    "note": "target = floor_to_grid( min(pe_ladder, erp_gate) )；所有输出都落在 grid 上"
+  },
+
+  "execution": {
+    "timing": "signal_at_close_t, fill_at_close_t+1",
+    "step_size": 0.125,
+    "max_steps_per_day": 1,
+    "deadband": 0.05,
+    "buy_confirm_closes": 1,
+    "sell_confirm_closes": 2,
+    "fee_one_way": 0.0005,
+    "cash_yield": 0.0,
+    "note": "deadband 是绝对仓位差阈值；买入1日确认、卖出2日确认"
+  },
+
+  "budget": {
+    "denominator": "strategy_budget",
+    "note": "所有仓位都是'沪深300策略专用资金池'的比例，不是家庭总资产比例"
+  }
+}

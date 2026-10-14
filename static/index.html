@@ -4,8 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>红利低波决策台</title>
+  <title>H30269 &amp; HS300 双决策台</title>
   <link rel="stylesheet" href="/static/app.css">
+<style>
+  .hs-tabs { display:flex; gap:8px; margin-left:12px; }
+  .hs-tabs a { text-decoration:none; padding:6px 14px; border-radius:8px; font-size:14px;
+    color:#4b5563; border:1px solid #e5e7eb; background:#fff; }
+  .hs-tabs a.active { background:#111827; color:#fff; border-color:#111827; }
+</style>
 </head>
 <body>
   <div class="app-shell">
@@ -13,14 +19,19 @@
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"><i data-lucide="chart-candlestick"></i></span>
         <div class="brand-copy">
-          <strong>红利低波决策台</strong>
-          <span>H30269 · V3.1</span>
+          <strong>H30269 &amp; HS300</strong>
+          <span>红利低波 · 决策台 V3.1</span>
         </div>
       </div>
 
       <nav class="tabs" aria-label="主导航">
         <button class="tab active" data-tab="overview">决策台</button>
         <button class="tab" data-tab="history">历史记录</button>
+      </nav>
+
+      <nav class="hs-tabs" aria-label="决策台切换">
+        <a href="/" class="active">红利低波</a>
+        <a href="/hs300">沪深300</a>
       </nav>
 
       <div class="top-actions">

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>H30269 &amp; HS300 双决策台</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .hs-tabs { display:flex; gap:8px; }
+  .hs-tabs a {
+    text-decoration:none; padding:6px 14px; border-radius:8px; font-size:14px;
+    color:#4b5563; border:1px solid #e5e7eb; background:#fff;
+  }
+  .hs-tabs a.active { background:#111827; color:#fff; border-color:#111827; }
+  .hs-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin:16px 0; }
+  .hs-card { border:1px solid #e5e7eb; border-radius:12px; padding:14px 16px; background:#fff; }
+  .hs-card .k { font-size:12px; color:#6b7280; }
+  .hs-card .v { font-size:24px; font-weight:700; margin-top:4px; }
+  .hs-card .s { font-size:12px; color:#9ca3af; margin-top:2px; }
+  .hs-hero { border:1px solid #e5e7eb; border-radius:14px; padding:20px; background:linear-gradient(135deg,#0f172a,#1e293b); color:#fff; margin:16px 0; }
+  .hs-hero .label { font-size:13px; opacity:.75; }
+  .hs-hero .big { font-size:40px; font-weight:800; letter-spacing:-.02em; }
+  .hs-hero .sub { font-size:13px; opacity:.8; margin-top:6px; }
+  .hs-ladder { width:100%; border-collapse:collapse; font-size:14px; margin-top:8px; }
+  .hs-ladder th, .hs-ladder td { border-bottom:1px solid #eef2f7; padding:8px 10px; text-align:right; }
+  .hs-ladder th:first-child, .hs-ladder td:first-child { text-align:left; }
+  .hs-ladder tr.cur { background:#fff7ed; font-weight:700; }
+  .hs-note { font-size:12px; color:#6b7280; border-left:3px solid #f59e0b; padding:8px 12px; background:#fffbeb; border-radius:6px; margin-top:14px; }
+  .hs-err { display:none; background:#fef2f2; color:#991b1b; border:1px solid #fecaca; border-radius:8px; padding:10px 14px; margin:12px 0; font-size:14px; }
+  .hs-btn { border:1px solid #e5e7eb; background:#fff; border-radius:8px; padding:6px 12px; cursor:pointer; font-size:14px; }
+  .hs-btn:hover { background:#f9fafb; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><i data-lucide="line-chart"></i></span>
+      <div class="brand-copy">
+        <strong>H30269 &amp; HS300</strong>
+        <span>沪深300 · 决策台 v2.0</span>
+      </div>
+    </div>
+    <nav class="hs-tabs" aria-label="决策台切换">
+      <a href="/">红利低波</a>
+      <a href="/hs300" class="active">沪深300</a>
+    </nav>
+    <div class="top-actions">
+      <div class="market-state"><span id="asOfText">读取中</span></div>
+      <button id="refreshButton" class="hs-btn" title="刷新">刷新</button>
+    </div>
+  </header>
+
+  <div id="errorBanner" class="hs-err"></div>
+
+  <section class="hs-hero">
+    <div class="label">当前建议（策略预算口径）</div>
+    <div class="big" id="target">--</div>
+    <div class="sub" id="heroSub">正在计算…</div>
+  </section>
+
+  <section class="hs-grid">
+    <div class="hs-card"><div class="k">000300 收盘</div><div class="v" id="px">--</div><div class="s" id="pxDate">--</div></div>
+    <div class="hs-card"><div class="k">滚动 PE</div><div class="v" id="pe">--</div><div class="s" id="pePct">--</div></div>
+    <div class="hs-card"><div class="k">PE 历史分位</div><div class="v" id="pep">--</div><div class="s">越低越便宜</div></div>
+    <div class="hs-card"><div class="k">股债利差 ERP</div><div class="v" id="erp">--</div><div class="s" id="erpPct">--</div></div>
+  </section>
+
+  <section class="hs-card">
+    <div class="k">买卖分档表（模型自动生成）</div>
+    <table class="hs-ladder" id="ladder">
+      <thead><tr><th>PE分位区间</th><th>目标仓位</th><th>PE</th><th>000300</th></tr></thead>
+      <tbody><tr><td colspan="4">加载中…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="hs-grid">
+    <div class="hs-card"><div class="k">回测年化（样本内）</div><div class="v" id="cagr">--</div><div class="s" id="btWindow">--</div></div>
+    <div class="hs-card"><div class="k">最大回撤</div><div class="v" id="mdd">--</div><div class="s">自净值高点</div></div>
+    <div class="hs-card"><div class="k">夏普</div><div class="v" id="sharpe">--</div><div class="s">风险调整后</div></div>
+    <div class="hs-card"><div class="k">平均仓位 / 调仓次数</div><div class="v" id="avgExp">--</div><div class="s" id="trades">--</div></div>
+  </section>
+
+  <div class="hs-note" id="disclosure"></div>
+</div>
+
+<script src="/static/vendor/lucide.min.js"></script>
+<script type="module" src="/static/hs300.js"></script>
+</body>
+</html>

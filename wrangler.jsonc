@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "h30269-advisor",
+  "name": "h30269-hs300",
   "main": "cloudflare/worker.js",
   "compatibility_date": "2026-08-07",
   "assets": {
