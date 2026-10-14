@@ -58,18 +58,21 @@ http://127.0.0.1:8765/
 
 源码仓库：<https://github.com/amiel-org/h30269-advisor>
 
-双击 `publish_update.bat`，输入本次更新说明即可提交并推送到 GitHub。（原文此处声称推送即自动部署，经实测不成立，已更正。）
+双击 `publish_update.bat`，输入本次更新说明即可提交并推送到 GitHub。推送 `main` 分支后 Cloudflare 会自动构建并部署。
 
-> **重要（已实测核实）：`git push` 不会自动部署。**
-> 2026-10-14 做了决定性探针实验：推送后四分钟内线上始终没有新版本的标记字段，
-> `wrangler deployments list` 里只有 `Source: Upload`（即手工 `wrangler deploy`）的记录。
-> GitHub 仓库只做**版本管理**；**真正上线必须跑 `npm run deploy:cloudflare`。**
+> **已实测核实（2026-10-14）：推送 GitHub 会自动部署。**
+> `h30269-hs300` 已连接仓库 `amiel-org/h30269-advisor`（生产分支 `main`）。
+> 实测：push 后旧 worker 约 16 秒、`h30269-hs300` 约 48 秒完成自动部署。
+>
+> Cloudflare 侧构建配置（控制台 → Workers & Pages → h30269-hs300 → Settings → Builds）：
+> - 构建命令：`node cloudflare/build.mjs`（**必填**；`cloudflare-dist/` 不在仓库里）
+> - 部署命令：`npx wrangler deploy`
 
-上线两步都要走：
+日常流程：
 
 ```powershell
-git add -A; git commit -m "..."; git push origin main   # 1) 存档到 GitHub
-npm run deploy:cloudflare                                 # 2) 新版真正部署
+git add -A; git commit -m "..."; git push origin main   # 推送即自动部署
+npm run deploy:cloudflare                                 # 需要立即生效时手工部署
 ```
 运行产生的行情缓存、报告、日志和打包文件已由 `.gitignore` 排除，不会随源码上传。
 
