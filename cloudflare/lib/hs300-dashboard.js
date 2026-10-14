@@ -4,7 +4,10 @@
 // refresh path, and an appended history row per successful refresh.
 import { buildHs300Result } from "./hs300-data.js";
 
-const CACHE_MS = 5 * 60 * 1000;
+// The underlying data is DAILY frequency: intraday re-fetching buys nothing and
+// makes a cold cache more likely.  30 minutes keeps manual refresh responsive
+// while the daily cron pre-warms the cache.
+const CACHE_MS = 30 * 60 * 1000;
 const DASH_KEY = "hs300:dashboard:latest";
 const HIST_KEY = "hs300:history";
 

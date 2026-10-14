@@ -12,18 +12,25 @@ const CSI_PERF = "https://www.csindex.com.cn/csindex-home/perf/index-perf";
 const EM_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36";
 
-async function fetchJson(url, { referer, timeoutMs = 20000 } = {}) {
+async function fetchJson(url, { referer, timeoutMs = 25000, retries = 3 } = {}) {
   const headers = { "User-Agent": UA };
   if (referer) headers.Referer = referer;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const resp = await fetch(url, { headers, signal: controller.signal });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`);
-    return await resp.json();
-  } finally {
-    clearTimeout(timer);
+  let lastError;
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await fetch(url, { headers, signal: controller.signal });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`);
+      return await resp.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 400 * attempt));
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  throw lastError;
 }
 
 function num(v) {
@@ -54,27 +61,36 @@ export async function fetchCsiSeries(code, startDate, endDate) {
   return rows;
 }
 
+function bondPageUrl(page) {
+  const url = new URL(EM_DATA);
+  const params = {
+    reportName: "RPTA_WEB_TREASURYYIELD", columns: "ALL",
+    pageSize: "500", pageNumber: String(page),
+    sortColumns: "SOLAR_DATE", sortTypes: "-1",
+  };
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  return url.toString();
+}
+
 export async function fetchBond10y() {
-  // The endpoint returns 500 rows per page (newest first) and holds ~20 pages
-  // back to 2002.  We must paginate: a single page covers only ~2 years, which
-  // would silently drop every older price row during alignment.
+  // Newest-first, 500 rows/page, ~20 pages back to 2002.  A single page covers
+  // only ~2 years and would silently drop every older price row, so we must
+  // paginate.  Pages are fetched CONCURRENTLY: serial fetching of 20 pages was
+  // slow enough to hit the request timeout on a cold cache.
+  const pages = 20;
+  const results = await Promise.all(
+    Array.from({ length: pages }, (_, i) =>
+      fetchJson(bondPageUrl(i + 1), { retries: 2 }).catch(() => null)),
+  );
   const out = {};
-  for (let page = 1; page <= 20; page += 1) {
-    const url = new URL(EM_DATA);
-    const params = {
-      reportName: "RPTA_WEB_TREASURYYIELD", columns: "ALL",
-      pageSize: "500", pageNumber: String(page),
-      sortColumns: "SOLAR_DATE", sortTypes: "-1",
-    };
-    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-    const payload = await fetchJson(url.toString());
+  for (const payload of results) {
+    if (!payload) continue;
     const data = (payload.result || {}).data || [];
     for (const row of data) {
       const v = num(row.EMM00166466);
       if (v === null) continue;
       out[String(row.SOLAR_DATE).slice(0, 10).replace(/-/g, "")] = v;
     }
-    if (data.length < 500) break;
   }
   return out;
 }
