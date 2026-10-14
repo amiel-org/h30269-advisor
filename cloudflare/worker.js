@@ -889,7 +889,7 @@ async function handleRequest(request, env) {
   }
   // ---- HS300 decision desk ---- //
   if (url.pathname === "/api/hs300/health" && request.method === "GET") {
-    return jsonResponse({ ok: true, time: chinaIso(), model_version: "hs300-v2.0", runtime: "cloudflare-worker", ci: "autodeploy-verify-2" });
+    return jsonResponse({ ok: true, time: chinaIso(), model_version: "hs300-v2.0", runtime: "cloudflare-worker" });
   }
   if (url.pathname === "/api/hs300/dashboard" && request.method === "GET") {
     return jsonResponse({ ok: true, data: await getHs300Dashboard(env, false) });
