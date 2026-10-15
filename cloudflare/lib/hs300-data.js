@@ -6,8 +6,8 @@
 //   * eastmoney       RPTA_WEB_TREASURYYIELD -> 10Y China government yield
 //
 // The bond series is forward-filled from PAST observations only.
-import { buildSignalDetail, buildSignals, ladderExposure, metrics,
-         percentileOfHistory, runBacktest } from "./hs300-model.js";
+import { buildSignals, ladderExposure, metrics, percentileOfHistory,
+         runBacktest, windowTargets } from "./hs300-model.js";
 
 const CSI_PERF = "https://www.csindex.com.cn/csindex-home/perf/index-perf";
 const EM_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get";
@@ -87,7 +87,7 @@ export async function fetchIntraday(code) {
     const raw = String(h.tradeDate || "");
     const date = raw.length === 10 ? raw.replace(/-/g, "") : (raw.length === 8 ? raw : "");
     const level = num(h.current);
-    if (!date || level === null) return null;
+    if (!date || level === null || level <= 0) return null;
     return {
       date,
       time: String(h.tradeTime || ""),
@@ -169,16 +169,55 @@ export async function buildHs300Result() {
   const run = runBacktest(series, undefined, signals, 1);
   const m = metrics(run.curve);
 
-  const last = series.dates.length - 1;
-  const peHist = series.pe.slice(0, last);
-  const erpHist = series.spread.slice(0, last);
-  const peNow = series.pe[last];
-  const erpNow = series.spread[last];
+  const settledLast = series.dates.length - 1;
 
-  // ---- per-window view + consensus (the model's actual decision) ---- //
-  const detail = buildSignalDetail(series).at(-1);
+  // ---- merge the LIVE intraday quote as a provisional bar ----
+  // The model runs on H00300 (total return) because that compounds for real,
+  // but csindex only publishes an intraday feed for the price index 000300.
+  // We therefore scale H00300 and PE by the 000300 move: intraday dividend
+  // accrual is a few basis points and cannot move a 12.5% ladder step.
+  let liveSeries = series;
+  let quoteStatus = "\u6536\u76d8\u540e";
+  let intraday = null;
+  let liveNote = null;
+  try {
+    const nextDate = intradayRaw ? intradayRaw.date : null;
+    if (nextDate && nextDate > series.dates[settledLast]) {
+      const closeByDate = new Map(priceRows.map((r) => [r.date, r.close]));
+      const basePx = closeByDate.get(series.dates[settledLast]);
+      if (basePx) {
+        const ratio = intradayRaw.level / basePx;
+        const bondKeys = Object.keys(bond).sort();
+        const yLive = bond[bondKeys[bondKeys.length - 1]];
+        const trLive = series.tr[settledLast] * ratio;
+        const peLive = series.pe[settledLast] * ratio;
+        liveSeries = {
+          dates: [...series.dates, nextDate],
+          tr: [...series.tr, trLive],
+          pe: [...series.pe, peLive],
+          spread: [...series.spread, 100 / peLive - yLive],
+        };
+        quoteStatus = "\u76d8\u4e2d";
+        intraday = { ...intradayRaw, ratio: +ratio.toFixed(6),
+                     tr_level: +trLive.toFixed(2), pe_live: +peLive.toFixed(4),
+                     bond_10y: yLive };
+        liveNote = `\u76d8\u4e2d\u4f30\u503c\uff1a\u6309 000300 \u5b9e\u65f6\u4ef7\u6309\u6bd4\u4f8b\u63a8\u7b97 H00300 \u4e0e PE\uff08\u6bd4\u4f8b ${ratio.toFixed(4)}\uff09\u3002`;
+      }
+    }
+  } catch (e) {
+    liveSeries = series; quoteStatus = "\u6536\u76d8\u540e"; intraday = null;
+    liveNote = `\u76d8\u4e2d\u6570\u636e\u63a5\u5165\u5931\u8d25\uff0c\u5df2\u56de\u9000\u5230\u6700\u540e\u6536\u76d8\u65e5\uff1a${e.message}`;
+  }
+
+  const liveLast = liveSeries.dates.length - 1;
+  const peHist = liveSeries.pe.slice(0, liveLast);
+  const erpHist = liveSeries.spread.slice(0, liveLast);
+  const peNow = liveSeries.pe[liveLast];
+  const erpNow = liveSeries.spread[liveLast];
+
+  const cur = windowTargets(peHist, erpHist, peNow, erpNow);
   const windows = {};
-  for (const [key, w] of Object.entries(detail.windows)) {
+  for (const [key, w] of Object.entries(cur.windows)) {
     windows[key] = {
       label: w.label,
       pe_percentile: w.pePercentile,
@@ -189,23 +228,21 @@ export async function buildHs300Result() {
   const pePct = percentileOfHistory(peHist, peNow);
   const erpPct = percentileOfHistory(erpHist, erpNow);
 
-  const priceNow = priceRows.length ? priceRows[priceRows.length - 1].close : null;
-
-  // Is the intraday quote NEWER than the last settled daily bar?  Only then is
-  // it worth showing; the model itself never uses an unsettled price.
-  const intraday = (intradayRaw && intradayRaw.date > series.dates[last]) ? intradayRaw : null;
+  const priceNow = intraday ? intraday.level
+    : (priceRows.length ? priceRows[priceRows.length - 1].close : null);
 
   // ---- boundary table computed SERVER-SIDE (front end must not recompute) ----
-  // The ladder changes target at PE percentiles 70/60/50/40/30.  For each
-  // boundary we publish the price level *at that boundary* for every window,
-  // plus the target just below and just above it.  That makes the trigger
-  // unambiguous: "drop to L(60) -> target becomes 0.375".
+  const pools = {};
+  for (const spec of WINDOW_SPECS_FOR_BANDS) {
+    const src = spec.mode === "rolling" && spec.days > 0 ? peHist.slice(-spec.days) : peHist;
+    pools[spec.name] = [...src].sort((a, b) => a - b);
+  }
   const boundaries = [];
   for (const pctBoundary of [70, 60, 50, 40, 30]) {
     const row = { pct: pctBoundary, levels: {}, pe: {}, target_below: null, target_above: null };
     for (const spec of WINDOW_SPECS_FOR_BANDS) {
-      const pool = spec.mode === "rolling" && spec.days > 0 ? peHist.slice(-spec.days) : peHist;
-      const qv = quantile(pool, pctBoundary);
+      const pool = pools[spec.name];
+      const qv = pool.length ? quantile(pool, pctBoundary) : null;
       row.pe[spec.name] = qv === null ? null : +qv.toFixed(4);
       row.levels[spec.name] = (qv === null || !priceNow) ? null : +(priceNow * qv / peNow).toFixed(1);
     }
@@ -214,19 +251,26 @@ export async function buildHs300Result() {
     boundaries.push(row);
   }
 
+  const priceAsOf = series.dates[settledLast];
+  const live = quoteStatus === "\u76d8\u4e2d";
+
   return {
-    as_of: series.dates[last],
-    price_asof: series.dates[last],
+    as_of: liveSeries.dates[liveLast],
+    price_asof: priceAsOf,
+    quote_status: quoteStatus,
+    live,
+    live_note: liveNote,
     intraday,
     price_index: { code: "000300", level: priceNow },
-    total_return_index: { code: "H00300", level: series.tr[last] },
-    pe: peNow,
+    total_return_index: { code: "H00300", level: liveSeries.tr[liveLast] },
+    pe: +peNow.toFixed(4),
     pe_percentile: +pePct.toFixed(2),
     erp: +erpNow.toFixed(4),
     erp_percentile: +erpPct.toFixed(2),
     windows,
-    consensus: { agreed: detail.agreed, exposure: detail.consensus_exposure, vote: detail.vote },
-    target_exposure: detail.consensus_exposure,
+    consensus: { agreed: cur.agreed, exposure: cur.consensus_exposure,
+                 vote: cur.vote, span: cur.span },
+    target_exposure: cur.consensus_exposure,
     boundaries,
     backtest: {
       cagr_calendar_pct: m.cagrCalendarPct,

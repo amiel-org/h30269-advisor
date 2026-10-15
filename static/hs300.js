@@ -16,23 +16,26 @@ const ORDER = ['full', '10y', '5y'];
 const WNAME = { full: '全历史', '10y': '近10年', '5y': '近5年' };
 const WPLAIN = { full: '全部历史（2011年至今）', '10y': '最近 10 年', '5y': '最近 5 年' };
 
-// ---------- 数据时效（回答"刷新还是昨天的"）----------
+// ---------- 数据时效 ----------
+// The desk now COMPUTES on the live intraday price (like the H30269 desk).
+// This banner must say so plainly, and flag that the reading is provisional.
 function renderFreshness(d) {
-  const el = $('#freshBanner');
+  const el = #freshBanner;
   const pxDay = ymd(d.price_asof || d.as_of);
   const i = d.intraday;
   el.style.display = 'block';
-  if (i) {
-    el.className = 'hs-fresh';
-    const chg = (i.change_pct === null || i.change_pct === undefined) ? '' :
-      `（${i.change_pct > 0 ? '+' : ''}${num(i.change_pct, 2)}%）`;
+  if (d.live && i) {
+    el.className = 'hs-fresh ok';
+    const chg = (i.change_pct === null || i.change_pct === undefined) ? ''
+      : '（' + (i.change_pct > 0 ? '+' : '') + num(i.change_pct, 2) + '%）';
     el.innerHTML =
-      `<b>今天（${ymd(i.date)}）还在盘中</b>：沪深300 现报 <b>${lvl(i.level)}</b>${chg} · ${i.time || ''}<br>` +
-      `估值指标（PE、分位）用的是最近一个<b>已收盘</b>交易日 <b>${pxDay}</b> 的数据。` +
-      `今天的收盘数据要等 <b>15:30 之后</b>才生成，所以结论仍是 ${pxDay} 的——这是正常的，不是没刷新。`;
+      '<b>实时（' + ymd(i.date) + ' ' + (i.time || '') + '）</b>：沪深300 <b>' + lvl(i.level) + '</b>' + chg +
+      '。下方所有分位与仓位都按这个<b>实时价</b>计算，可直接用于盘中决策。<br>' +
+      '<span style="opacity:.85">盘中为临时值，收盘后可能变化；上一个已收盘交易日是 ' + pxDay + '。</span>';
   } else {
     el.className = 'hs-fresh ok';
-    el.innerHTML = `数据基准：<b>${pxDay}</b>（最近一个已收盘交易日）。周末与节假日不开盘，不会有新数据。`;
+    el.innerHTML = '已收盘数据：<b>' + pxDay + '</b>（最近一个已收盘交易日）。' +
+      '未开盘期间不会更新，开盘后自动切换为实时价。';
   }
 }
 
