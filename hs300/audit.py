@@ -186,105 +186,38 @@ def main() -> int:
         print("offline audit complete:", "ALL PASS" if not failures else f"{len(failures)} FAILED")
         return 1 if failures else 0
 
-    # ------------------------------------------------------------------ #
-    print("7. deployed worker: live price derivation")
+    # Live audits validate the deployed contract, not the removed intraday
+    # simulation. Quotes must never mutate official settled decision inputs.
+    print("7. deployed worker: settled signal contract")
     def get(url, method="GET"):
-        r = urllib.request.Request(url, method=method,
-                                   headers={"User-Agent": UA,
-                                            "Referer": "https://www.csindex.com.cn/"})
-        return json.loads(urllib.request.urlopen(r, timeout=240).read().decode())
+        req = urllib.request.Request(url, method=method, headers={"User-Agent": UA})
+        return json.loads(urllib.request.urlopen(req, timeout=40).read().decode())
 
-    HDR = {"User-Agent": UA,
-           "Referer": "https://www.csindex.com.cn/zh-CN/indices/index-detail/000300"}
-
-    def csi(url):
-        return json.loads(urllib.request.urlopen(
-            urllib.request.Request(url, headers=HDR), timeout=30).read().decode())
-
-    daily = csi("https://www.csindex.com.cn/csindex-home/perf/index-perf"
-                "?indexCode=000300&startDate=20260901&endDate=20261231")["data"]
-    trd = csi("https://www.csindex.com.cn/csindex-home/perf/index-perf"
-              "?indexCode=H00300&startDate=20260901&endDate=20261231")["data"]
-    live = csi("https://www.csindex.com.cn/csindex-home/perf/index-perf-oneday"
-               "?indexCode=000300")["data"].get("intraDayHeader") or {}
-
-    settled_date = str(daily[-1]["tradeDate"])
-    settled_px = float(daily[-1]["close"])
-    settled_pe = float(daily[-1]["peg"])
-    tr_settled = float(trd[-1]["close"])
-    live_px = float(live.get("current") or 0)
-    live_date = str(live.get("tradeDate") or "").replace("-", "")
-
-    api = get(WORKER + "/api/hs300/dashboard")["data"]
-    if live_px <= 0 or live_date <= settled_date:
-        print("       (market closed; checking settled fallback)")
-        check("worker falls back to the settled close",
-              api["live"] is False and api["price_asof"] == settled_date)
-    else:
-        ratio = live_px / settled_px
-        check("as_of == live date", api["as_of"] == live_date,
-              f"{api['as_of']} vs {live_date}")
-        check("price_asof == settled date", api["price_asof"] == settled_date)
-        check("live flag", api["live"] is True)
-        i = api["intraday"] or {}
-        check("ratio matches 000300 move", abs(i.get("ratio", 0) - ratio) < 1e-6)
-        check("H00300 scaled correctly",
-              abs(i.get("tr_level", 0) - tr_settled * ratio) < 0.05)
-        check("PE scaled correctly",
-              abs(api["pe"] - settled_pe * ratio) < 1e-4)
-        check("price shown is the live price",
-              abs(api["price_index"]["level"] - live_px) < 1e-6)
-        check("total_return_index == scaled level",
-              abs(api["total_return_index"]["level"] - i.get("tr_level", 0)) < 0.05)
-
-    print("8. deployed worker: ladder table is server-side and monotone")
+    health = get(WORKER + "/api/hs300/health")
+    check("deployed configuration version", health.get("model_version") == "hs300-" + cfg.version)
+    payload = get(WORKER + "/api/hs300/dashboard")
+    check("dashboard API success", payload.get("ok") is True)
+    api = payload["data"]
+    check("official decision date equals settled price date", api["as_of"] == api["price_asof"])
+    check("input quality metadata present", "actionable" in api.get("quality", {}))
+    check("dated bond input", bool(api.get("bond", {}).get("as_of")))
+    check("three populated windows", set(api.get("windows", {})) == {n for n, _, _ in WINDOWS})
+    check("actual position is not fabricated", api.get("execution", {}).get("actual_position_known") is False)
+    vals = [w["exposure"] for w in api["windows"].values()]
+    agree = all(isinstance(v, (int, float)) for v in vals) and len(set(vals)) == 1
+    check("live consensus matches window targets", agree == api["consensus"]["agreed"])
+    check("HOLD on disagreement", agree or api["target_exposure"] == "HOLD")
+    print("8. deployed conditional observations")
+    levels = api.get("conditional_levels") or {}
+    spot = api["price_index"]["level"]
+    for kind in ("buy", "sell"):
+        line = levels.get(kind)
+        if line:
+            check(kind + " requires all windows", line.get("all_windows_agree") is True)
+            check(kind + " direction", line["level"] < spot if kind == "buy" else line["level"] > spot)
     rows = api.get("ladder") or []
-    check("ladder present", len(rows) == 6, f"got {len(rows)}")
-    if len(rows) == 6:
-        check("targets rise as bands get cheaper",
-              all(rows[i]["target"] < rows[i + 1]["target"] for i in range(5)))
-        check("top band is empty", rows[0]["target"] == 0.0)
-        check("bottom band is full", rows[-1]["target"] == 1.0)
-        ok = True
-        for name, _, _ in WINDOWS:
-            for i in range(len(rows) - 1):
-                a, b = rows[i]["levels"].get(name), rows[i + 1]["levels"].get(name)
-                if a is None or b is None:
-                    continue
-                if b > a + 1e-6:
-                    ok = False
-        check("price levels fall as bands get cheaper", ok)
-
-    print("9. deployed worker: buy/sell triggers point the right way")
-    bnd = api.get("boundaries") or []
-    cur = api["pe_percentile"]
-    buys = sorted([b for b in bnd if b["pct"] < cur], key=lambda z: -z["pct"])
-    sells = sorted([b for b in bnd if b["pct"] > cur], key=lambda z: z["pct"])
-    idx = next((i for i, r in enumerate(rows)
-                if r["lo"] is not None and cur >= r["lo"]), None)
-    if buys and idx is not None:
-        check("next buy raises the target", buys[0]["target_below"] > rows[idx]["target"])
-        check("full-history buy line is below the current price",
-              buys[0]["levels"]["full"] < api["price_index"]["level"])
-    if sells and idx is not None:
-        check("next sell lowers the target", sells[0]["target_above"] < rows[idx]["target"])
-        check("full-history sell line is above the current price",
-              sells[0]["levels"]["full"] > api["price_index"]["level"])
-
-    # Cross-window divergence is INFORMATION, not an error: a window that finds
-    # the market cheap legitimately has its buy line above the current price.
-    # Report it so it is visible rather than asserted away.
-    if buys:
-        above = [k for k, v in buys[0]["levels"].items()
-                 if v is not None and v >= api["price_index"]["level"]]
-        print(f"       (buy line already above spot in window(s): {above or 'none'}"
-              f" -- normal when that window judges the market cheap)")
-    if sells:
-        below = [k for k, v in sells[0]["levels"].items()
-                 if v is not None and v <= api["price_index"]["level"]]
-        print(f"       (sell line already below spot in window(s): {below or 'none'}"
-              f" -- normal when that window judges the market expensive)")
-
+    check("PE reference table populated", len(rows) == len(cfg.ladder))
+    check("latest history returned", bool(api.get("history")))
     print()
     print("full audit complete:", "ALL PASS" if not failures else f"{len(failures)} FAILED")
     return 1 if failures else 0

@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "build:cloudflare": "node cloudflare/build.mjs",
-    "test:cloudflare": "node --test cloudflare/worker.test.mjs",
+    "test:cloudflare": "node --test cloudflare/worker.test.mjs cloudflare/hs300.test.mjs",
     "check:parity": "node cloudflare/parity.mjs",
     "dev:cloudflare": "npm run build:cloudflare && wrangler dev",
     "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",
     "test:hs300": "node cloudflare/hs300-parity.mjs",
-    "test:all": "npm run test:cloudflare && node cloudflare/parity.mjs && node cloudflare/hs300-parity.mjs"
+    "test:all": "npm run build:cloudflare && npm run test:cloudflare && node cloudflare/parity.mjs && node cloudflare/hs300-parity.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.119.0"

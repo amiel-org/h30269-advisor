@@ -8,7 +8,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildSignals, metrics, runBacktest } from "./lib/hs300-model.js";
+import { DEFAULT_CONFIG, buildSignals, metrics, runBacktest } from "./lib/hs300-model.js";
+import { alignSeries } from "./lib/hs300-data.js";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (p) => JSON.parse(readFileSync(join(root, p), "utf8"));
@@ -39,7 +40,9 @@ function align(bundle) {
   return { dates, tr, pe, spread };
 }
 
-const series = align(snapshot);
+const series = alignSeries(snapshot.price, snapshot.total_return, snapshot.bond10y);
+assert.deepEqual(series, align(snapshot), "production alignment vs independently rebuilt snapshot");
+assert.equal(DEFAULT_CONFIG.version, expected.config_version, "configuration version");
 
 // ---- 1. signals must match the Python-produced series ---- //
 const rawSignals = buildSignals(series);
@@ -77,12 +80,24 @@ const metricMap = [
   ["maxDrawdownPct", "max_drawdown_pct"],
   ["sharpe", "sharpe"],
   ["endNav", "end_nav"],
+  ["cagr252Pct", "cagr_252_pct"],
 ];
 for (const [jsKey, pyKey] of metricMap) {
   assert.ok(Math.abs(m[jsKey] - exp[pyKey]) < 5e-3,
     `${jsKey}: js=${m[jsKey]} py=${exp[pyKey]}`);
 }
 assert.equal(run.steps.length, expected.trades, `trade count js=${run.steps.length} py=${expected.trades}`);
+assert.ok(Math.abs(run.turnover - expected.turnover) < 1e-6, "total turnover");
+for (let i = 0; i < run.steps.length; i += 1) {
+  const a = run.steps[i], b = expected.steps[i];
+  assert.equal(a.date, b.date, `step ${i} fill date`);
+  assert.equal(a.kind, b.kind, `step ${i} direction`);
+  assert.equal(a.streak, b.streak, `step ${i} close confirmation`);
+  for (const [js, py] of [["weightAfter", "weight_after"], ["weightBefore", "weight_before"],
+    ["navBefore", "nav_before"], ["tradedFraction", "traded_fraction"], ["target", "target"]]) {
+    assert.ok(Math.abs(a[js] - b[py]) < 1e-9, `step ${i} ${js}`);
+  }
+}
 
 // ---- 3. current signal must match ---- //
 const last = series.dates.length - 1;

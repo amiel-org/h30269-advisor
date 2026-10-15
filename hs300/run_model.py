@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 from data import align
-from model import (Config, build_signals, metrics, percentile_of_history,
-                   run_backtest, target_exposure)
+from model import (Account, Config, build_signals, metrics, percentile_of_history,
+                   run_backtest, window_targets)
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "reports"
@@ -22,27 +22,28 @@ def buy_hold(series, start_idx):
 
 
 def fixed_weight(series, start_idx, w, rebalance, fee):
-    equity, cash = w, 1.0 - w
+    account = Account()
+    account.rebalance_to(w, fee)
+    # Use a pre-entry baseline so initial commission is reflected in NAV.
     curve = [(series.dates[start_idx], 1.0)]
     for i in range(start_idx + 1, len(series)):
+        account.grow(series.tr[i] / series.tr[i - 1] - 1.0)
         if rebalance:
-            nav = equity + cash
-            notional = w * nav - equity
-            equity += notional
-            cash -= notional + abs(notional) * fee
-        equity *= series.tr[i] / series.tr[i - 1]
-        curve.append((series.dates[i], equity + cash))
+            account.rebalance_to(w, fee)
+        curve.append((series.dates[i], account.nav))
     return curve
 
 
 def current_signal(series, cfg):
     pe_pct = percentile_of_history(series.pe[:-1], series.pe[-1])
     erp_pct = percentile_of_history(series.spread[:-1], series.spread[-1])
+    detail = window_targets(series.pe[:-1], series.spread[:-1], series.pe[-1], series.spread[-1], cfg)
     return {
         "date": series.dates[-1], "total_return_level": series.tr[-1],
         "pe": series.pe[-1], "spread_pct": round(series.spread[-1], 4),
         "pe_percentile": round(pe_pct, 2), "erp_percentile": round(erp_pct, 2),
-        "target_exposure": target_exposure(pe_pct, erp_pct, cfg),
+        "target_exposure": detail["consensus_exposure"],
+        "agreed": detail["agreed"], "windows": detail["windows"],
     }
 
 
@@ -82,7 +83,7 @@ def main():
     line(f"hold @ {avg_w}", results["benchmark_matched_hold"])
     line(f"rebalanced @ {avg_w}", results["benchmark_matched_rebalanced"])
     cs = results["current_signal"]
-    print(f"\ncurrent {cs['date']}: PE={cs['pe']:.2f} PE_pct={cs['pe_percentile']:.1f}% ERP_pct={cs['erp_percentile']:.1f}% -> target={cs['target_exposure']:.3f}")
+    print(f"\ncurrent {cs['date']}: PE={cs['pe']:.2f} PE_pct={cs['pe_percentile']:.1f}% ERP_pct={cs['erp_percentile']:.1f}% -> target={cs['target_exposure']}")
     return 0
 
 

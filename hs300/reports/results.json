@@ -1,5 +1,5 @@
 {
-  "config_version": "v2.3",
+  "config_version": "v2.4",
   "rows": 3647,
   "window": [
     "20140822",
@@ -10,7 +10,7 @@
     "end": "20261013",
     "years_calendar": 12.1424,
     "cagr_calendar_pct": 8.0484,
-    "cagr_252_pct": 8.3692,
+    "cagr_252_pct": 8.3722,
     "max_drawdown_pct": -22.4081,
     "sharpe": 0.7386,
     "end_nav": 2.559805,
@@ -24,7 +24,7 @@
     "end": "20261013",
     "years_calendar": 12.1424,
     "cagr_calendar_pct": 7.8208,
-    "cagr_252_pct": 8.1322,
+    "cagr_252_pct": 8.1351,
     "max_drawdown_pct": -22.4093,
     "sharpe": 0.7225,
     "end_nav": 2.495086,
@@ -37,7 +37,7 @@
     "end": "20261013",
     "years_calendar": 12.1424,
     "cagr_calendar_pct": 7.33,
-    "cagr_252_pct": 7.6212,
+    "cagr_252_pct": 7.6238,
     "max_drawdown_pct": -46.0589,
     "sharpe": 0.4492,
     "end_nav": 2.360616,
@@ -47,22 +47,22 @@
     "start": "20140822",
     "end": "20261013",
     "years_calendar": 12.1424,
-    "cagr_calendar_pct": 3.7333,
-    "cagr_252_pct": 3.879,
+    "cagr_calendar_pct": 3.7315,
+    "cagr_252_pct": 3.8785,
     "max_drawdown_pct": -28.2926,
-    "sharpe": 0.376,
-    "end_nav": 1.560574,
+    "sharpe": 0.3759,
+    "end_nav": 1.560252,
     "days": 2947
   },
   "benchmark_matched_rebalanced": {
     "start": "20140822",
     "end": "20261013",
     "years_calendar": 12.1424,
-    "cagr_calendar_pct": 3.4934,
-    "cagr_252_pct": 3.6297,
+    "cagr_calendar_pct": 3.4917,
+    "cagr_252_pct": 3.6291,
     "max_drawdown_pct": -21.2111,
-    "sharpe": 0.446,
-    "end_nav": 1.51732,
+    "sharpe": 0.4458,
+    "end_nav": 1.517005,
     "days": 2947
   },
   "current_signal": {
@@ -72,6 +72,27 @@
     "spread_pct": 5.9682,
     "pe_percentile": 56.09,
     "erp_percentile": 76.91,
-    "target_exposure": 0.375
+    "target_exposure": "HOLD",
+    "agreed": false,
+    "windows": {
+      "full": {
+        "label": "全历史",
+        "pe_percentile": 56.0889,
+        "erp_percentile": 76.9062,
+        "exposure": 0.375
+      },
+      "10y": {
+        "label": "近10年",
+        "pe_percentile": 47.418,
+        "erp_percentile": 82.1721,
+        "exposure": 0.625
+      },
+      "5y": {
+        "label": "近5年",
+        "pe_percentile": 65.9836,
+        "erp_percentile": 65.7377,
+        "exposure": 0.125
+      }
+    }
   }
 }

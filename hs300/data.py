@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 import datetime as dt
 import json
+import math
 from pathlib import Path
 
 from model import Series
@@ -31,11 +32,16 @@ def align(snapshot=None, *, drop_weekends: bool = True,
     tr_map = {r["date"]: r["close"] for r in bundle["total_return"]}
 
     dates, tr, pe, spread = [], [], [], []
+    price_by_date = {}
     for row in bundle["price"]:
+        if row["date"] in price_by_date and price_by_date[row["date"]] != row:
+            raise ValueError("conflicting duplicate price row")
+        price_by_date[row["date"]] = row
+    for row in sorted(price_by_date.values(), key=lambda r: r["date"]):
         d = row["date"]
         if drop_weekends and _weekend(d):
             continue
-        if drop_missing_pe and not row.get("pe"):
+        if drop_missing_pe and row.get("pe") is None:
             continue
         if d not in tr_map:
             continue
@@ -44,6 +50,10 @@ def align(snapshot=None, *, drop_weekends: bool = True,
             continue
         y = bond[bond_keys[idx]]
         pe_value = float(row["pe"])
+        if (dt.datetime.strptime(d, "%Y%m%d") - dt.datetime.strptime(bond_keys[idx], "%Y%m%d")).days > 7:
+            raise ValueError(f"bond history stale for {d}")
+        if not all(math.isfinite(v) and v > 0 for v in (pe_value, float(tr_map[d]), float(row["close"]), float(y))):
+            raise ValueError("invalid price, PE, total return or bond yield")
         dates.append(d)
         tr.append(float(tr_map[d]))
         pe.append(pe_value)

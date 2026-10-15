@@ -1,50 +1,19 @@
-// HS300 decision model v2.0 -- JavaScript port of hs300/model.py
+// HS300 decision model -- JavaScript port of hs300/model.py
 //
 // This is a deliberate re-implementation for the Worker runtime.  It must stay
 // byte-for-byte equivalent in RESULTS with the Python reference; that is what
 // cloudflare/hs300-parity.mjs verifies against the frozen snapshot.
 //
 // Design rules (mirrors model.py):
-//   * every input used for a decision excludes the current observation;
+//   * historical percentile pools exclude the current observation;
 //   * output exposure is discrete on a fixed grid;
 //   * signal at close of day t, filled at close of day t+1;
 //   * equity and cash are tracked separately; fees hit NAV.
 
-export const DEFAULT_CONFIG = {
-  version: "v2.0",
-  allocation: {
-    grid: 0.125,
-    pe_ladder: [
-      { min_pct: 70, exposure: 0.0 },
-      { min_pct: 60, exposure: 0.125 },
-      { min_pct: 50, exposure: 0.375 },
-      { min_pct: 40, exposure: 0.625 },
-      { min_pct: 30, exposure: 0.875 },
-      { min_pct: 0, exposure: 1.0 },
-    ],
-    erp_gate: { lo: 30, hi: 70 },
-    tolerance_steps: 0,
-    tolerance_rule: "conservative",
-  },
-  indicators: {
-    pe_percentile: { min_obs: 700 },
-    erp_percentile: { min_obs: 700 },
-    // Consensus windows: each computes its own exposure; all must agree.
-    percentile_windows: [
-      { name: "full", label: "全历史", mode: "expanding", min_obs: 700 },
-      { name: "10y", label: "近10年", mode: "rolling", days: 2440, min_obs: 700 },
-      { name: "5y", label: "近5年", mode: "rolling", days: 1220, min_obs: 700 },
-    ],
-  },
-  execution: {
-    deadband: 0.05,
-    fee_one_way: 0.0005,
-    cash_yield: 0.0,
-    step_size: 0.125,
-    buy_confirm_closes: 1,
-    sell_confirm_closes: 2,
-  },
-};
+import modelConfig from "../../hs300/config.json" with { type: "json" };
+
+// Python and Workers consume the same configuration.
+export const DEFAULT_CONFIG = modelConfig;
 
 // --------------------------------------------------------------------------- //
 // allocation rules -- must match model.py exactly
@@ -67,6 +36,7 @@ export function quantizeDown(value, grid) {
 }
 
 export function targetExposure(pePct, erpPct, cfg = DEFAULT_CONFIG) {
+  if (![pePct, erpPct].every(Number.isFinite)) throw new Error("invalid percentile");
   const lad = ladderExposure(pePct, cfg.allocation.pe_ladder);
   const gate = erpGate(erpPct, cfg.allocation.erp_gate.lo, cfg.allocation.erp_gate.hi);
   return quantizeDown(Math.min(lad, gate), cfg.allocation.grid);
@@ -74,6 +44,7 @@ export function targetExposure(pePct, erpPct, cfg = DEFAULT_CONFIG) {
 
 export function percentileOfHistory(history, current) {
   if (!history.length) throw new Error("empty history");
+  if (!Number.isFinite(current)) throw new Error("invalid percentile input");
   let below = 0;
   for (const x of history) if (x <= current) below += 1;
   return (100 * below) / history.length;
@@ -119,7 +90,7 @@ export function windowTargets(peHist, erpHist, peNow, erpNow, cfg = DEFAULT_CONF
   const grid = cfg.allocation.grid;
   const tol = (cfg.allocation.tolerance_steps || 0) * grid;
   const span = values.length ? Math.max(...values) - Math.min(...values) : null;
-  const within = values.length > 0 && span <= tol + 1e-9;
+  const within = values.length === cfg.indicators.percentile_windows.length && values.length > 0 && span <= tol + 1e-9;
   const chosen = within
     ? (cfg.allocation.tolerance_rule === "conservative" ? Math.min(...values) : values[0])
     : HOLD;
@@ -284,13 +255,13 @@ export function metrics(curve, periodsPerYear = 252) {
   }
   const rets = [];
   for (let i = 1; i < values.length; i += 1) rets.push(values[i] / values[i - 1] - 1);
-  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
-  const sd = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / rets.length);
+  const mean = rets.length ? rets.reduce((a, b) => a + b, 0) / rets.length : 0;
+  const sd = rets.length ? Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / rets.length) : 0;
   return {
     start: curve[0][0], end: curve[curve.length - 1][0],
     yearsCalendar: +years.toFixed(4),
-    cagrCalendarPct: years > 0 ? +((values[values.length - 1] ** (1 / years) - 1) * 100).toFixed(4) : null,
-    cagr252Pct: +((values[values.length - 1] ** (periodsPerYear / values.length) - 1) * 100).toFixed(4),
+    cagrCalendarPct: years > 0 ? +(((values[values.length - 1] / values[0]) ** (1 / years) - 1) * 100).toFixed(4) : null,
+    cagr252Pct: rets.length ? +(((values[values.length - 1] / values[0]) ** (periodsPerYear / rets.length) - 1) * 100).toFixed(4) : null,
     maxDrawdownPct: +(mdd * 100).toFixed(4),
     sharpe: sd > 0 ? +((mean / sd) * Math.sqrt(periodsPerYear)).toFixed(4) : null,
     endNav: +values[values.length - 1].toFixed(6),

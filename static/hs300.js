@@ -17,25 +17,28 @@ const WNAME = { full: '全历史', '10y': '近10年', '5y': '近5年' };
 const WPLAIN = { full: '全部历史（2011年至今）', '10y': '最近 10 年', '5y': '最近 5 年' };
 
 // ---------- 数据时效 ----------
-// The desk now COMPUTES on the live intraday price (like the H30269 desk).
-// This banner must say so plainly, and flag that the reading is provisional.
+// Official decisions use settled daily observations. A dated quote is shown
+// separately and must never be presented as a confirmed trade signal.
 function renderFreshness(d) {
-  const el = #freshBanner;
+  const el = $('#freshBanner');
   const pxDay = ymd(d.price_asof || d.as_of);
   const i = d.intraday;
   el.style.display = 'block';
-  if (d.live && i) {
+  if (d.refresh_status === 'stale' || !d.quality?.actionable) {
+    el.className = 'hs-fresh';
+    el.textContent = `数据暂不可用于交易判断。最近收盘：${pxDay}；${(d.quality?.blockers || []).join('；')}`;
+  } else if (i) {
     el.className = 'hs-fresh ok';
     const chg = (i.change_pct === null || i.change_pct === undefined) ? ''
       : '（' + (i.change_pct > 0 ? '+' : '') + num(i.change_pct, 2) + '%）';
     el.innerHTML =
-      '<b>实时（' + ymd(i.date) + ' ' + (i.time || '') + '）</b>：沪深300 <b>' + lvl(i.level) + '</b>' + chg +
-      '。下方所有分位与仓位都按这个<b>实时价</b>计算，可直接用于盘中决策。<br>' +
-      '<span style="opacity:.85">盘中为临时值，收盘后可能变化；上一个已收盘交易日是 ' + pxDay + '。</span>';
+      '<b>' + (d.live ? '盘中报价' : '最近报价') + '（' + ymd(i.date) + ' ' + (i.time || '') + '）</b>：沪深300 <b>' + lvl(i.level) + '</b>' + chg +
+      '。盘中报价仅供观察，<b>不参与正式买卖信号或连续收盘确认</b>。<br>' +
+      '<span style="opacity:.85">下方分位与目标仓位依据 ' + pxDay + ' 已发布收盘数据；国债日期 ' + ymd(d.bond?.as_of) + '。</span>';
   } else {
     el.className = 'hs-fresh ok';
     el.innerHTML = '已收盘数据：<b>' + pxDay + '</b>（最近一个已收盘交易日）。' +
-      '未开盘期间不会更新，开盘后自动切换为实时价。';
+      '国债日期 ' + ymd(d.bond?.as_of) + '。刷新可重新获取报价；正式信号等待新收盘数据。';
   }
 }
 
@@ -43,33 +46,36 @@ function renderFreshness(d) {
 function renderVerdict(d) {
   const hero = $('#hero');
   const c = d.consensus || {};
-  if (c.agreed && typeof c.exposure === 'number') {
+  if (!d.quality?.actionable) {
+    hero.classList.add('wait');
+    $('#verdict').textContent = '暂停交易提示';
+    $('#verdictSay').textContent = (d.quality?.blockers || ['数据未通过时效检查']).join('；');
+  } else if (c.agreed && typeof c.exposure === 'number') {
     hero.classList.remove('wait');
-    $('#verdict').textContent = `持有 ${(c.exposure * 100).toFixed(1)}%`;
+    $('#verdict').textContent = `目标仓位 ${(c.exposure * 100).toFixed(1)}%`;
+    const ex = d.execution || {};
     $('#verdictSay').innerHTML =
-      `三个时间窗口看法<b>一致</b>，沪深300 目标仓位 <b>${(c.exposure * 100).toFixed(1)}%</b>。`;
+      `三个时间窗口目标一致，已连续 ${ex.confirmed_closes || 0} 个收盘日。<br>` +
+      `买入需 ${ex.buy_required} 日确认，卖出需 ${ex.sell_required} 日确认；满足后次一交易日收盘最多调整 12.5 个百分点。<br>` +
+      `这是策略资金池的目标，尚未结合你的实际仓位，不能直接等同本次买卖比例。`;
   } else {
     hero.classList.add('wait');
-    $('#verdict').textContent = '什么都不用做';
+    $('#verdict').textContent = '模型暂不调仓';
     const w = d.windows || {};
     const parts = ORDER.filter((k) => w[k]).map((k) => `${WNAME[k]} ${pct(w[k].pe_percentile)}`);
     const gap = (d.consensus && d.consensus.span !== undefined && d.consensus.span !== null)
       ? `（三种看法相差 ${(d.consensus.span / 0.125).toFixed(0)} 档）` : '';
     $('#verdictSay').innerHTML =
       `三个时间窗口看法<b>不一致</b>${gap}：${parts.join(' · ')}。<br>` +
-      `分歧通常出现在估值不上不下的中间地带，此时动手没有优势，所以<b>保持现在的仓位不动</b>，等看法统一。`;
+      `按已冻结的规则保持现有仓位，等待三窗口目标一致。分歧本身不能证明市场没有投资机会。`;
   }
 }
 
 // ---------- 动作清单：下一买点 / 下一卖点 ----------
-// Uses `boundaries`: each row is a PE-percentile boundary with the price level at
-// which the ladder target changes.
+// Uses the server's conditional_levels: PE + ERP + all configured windows.
 function renderActions(d) {
   const host = $('#actions');
   host.innerHTML = '';
-  const cur = d.pe_percentile;
-  const priceNow = d.price_index && d.price_index.level;
-  const bounds = d.boundaries || [];
 
   const row = (cls, tag, head, sub) => {
     const li = document.createElement('li');
@@ -79,34 +85,19 @@ function renderActions(d) {
                    `</span>`;
     return li;
   };
-  // direction matters: a buy trigger fires on a FALL (<=), a sell on a RISE (>=)
-  const levelsOf = (b, dir) => ORDER
-    .filter((k) => b.levels && b.levels[k] !== null && b.levels[k] !== undefined)
-    .map((k) => `${WNAME[k]} ${dir} ${lvl(b.levels[k])}`).join(' 或 ');
-
-  // next buy: the highest boundary strictly BELOW current percentile
-  const buys = bounds.filter((b) => b.pct < cur).sort((a, b) => b.pct - a.pct);
-  // next sell: the lowest boundary strictly ABOVE current percentile
-  const sells = bounds.filter((b) => b.pct > cur).sort((a, b) => a.pct - b.pct);
-
-  if (buys.length) {
-    const b = buys[0];
-    host.appendChild(row('buy', `加仓到 ${(b.target_below * 100).toFixed(1)}%`,
-      `<b>沪深300 跌到这些点位时</b>`, levelsOf(b, '≤')));
-  } else {
-    host.appendChild(row('hold', '已是底档', '没有更低的加仓线了。', ''));
+  if (!d.quality?.actionable) {
+    host.appendChild(row('hold', '暂停', '数据不可用于交易判断，暂不展示买卖观察线。', ''));
+    return;
   }
-
-  if (sells.length) {
-    const b = sells[0];
-    host.appendChild(row('sell', `减仓到 ${(b.target_above * 100).toFixed(1)}%`,
-      `<b>沪深300 涨到这些点位时</b>`, levelsOf(b, '≥')));
-  } else {
-    host.appendChild(row('hold', '暂无减仓线', '还没进入减仓区间。', ''));
+  const levels = d.conditional_levels || {};
+  for (const [kind, label] of [['buy', '加仓观察'], ['sell', '减仓观察']]) {
+    const line = levels[kind];
+    host.appendChild(row(kind, label, line
+      ? `条件估算点位 <b>${lvl(line.level)}</b>；三窗口目标均为 <b>${(line.target * 100).toFixed(1)}%</b>`
+      : '当前假设下没有找到对应观察线。',
+      line ? '点位处同时检查了 PE 与 ERP。还须满足收盘确认、真实仓位差和每次一档的限制，越过该价位后需重新计算。' : ''));
   }
-
-  host.appendChild(row('now', '当前位置',
-    `沪深300 现在 <b>${lvl(priceNow)}</b>，PE 历史分位 <b>${pct(cur)}</b>`, ''));
+  host.appendChild(row('now', '估算前提', levels.assumption || '等待下一次正式收盘后复核。', ''));
 }
 
 // ---------- 三窗口 ----------
@@ -123,7 +114,7 @@ function renderWindows(d) {
     div.innerHTML =
       `<div class="n">${WPLAIN[k]}</div>` +
       `<div class="p">${pct(w[k].pe_percentile)}</div>` +
-      `<div class="e">建议仓位 ${expo}</div>`;
+      `<div class="e">ERP 分位 ${pct(w[k].erp_percentile)} · 目标仓位 ${expo}</div>`;
     host.appendChild(div);
   }
 }
@@ -178,6 +169,8 @@ function render(d) {
   $('#mdd').textContent = pct(bt.max_drawdown_pct, 2);
   $('#sharpe').textContent = num(bt.sharpe, 2);
   $('#avgExp').textContent = `${((bt.avg_exposure || 0) * 100).toFixed(1)}% / ${bt.trades} 次`;
+  $('#backtestPeriod').textContent = `${ymd(bt.start)} 至 ${ymd(bt.end)}，样本内研究；没有经核实的实盘业绩。`;
+  $('#buyHold').textContent = `${pct(bt.buy_hold?.cagrCalendarPct, 2)} / ${pct(bt.buy_hold?.maxDrawdownPct, 2)}`;
 
   $('#disclosure').innerHTML = (d.disclosures || []).join('<br>');
 }
@@ -185,17 +178,30 @@ function render(d) {
 async function load(force) {
   clearError();
   $('#refreshButton').disabled = true;
+  $('#refreshButton').textContent = '刷新中…';
+  $('#asOfText').textContent = force ? '正在更新数据' : '正在读取数据';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), window.HS300_REQUEST_TIMEOUT_MS || 35000);
   try {
     const url = force ? '/api/hs300/refresh' : '/api/hs300/dashboard';
-    const resp = await fetch(url, { method: force ? 'POST' : 'GET', cache: 'no-store' });
+    const resp = await fetch(url, { method: force ? 'POST' : 'GET', cache: 'no-store', signal: controller.signal });
+    if (!resp.ok) throw new Error(`接口返回 HTTP ${resp.status}`);
     const body = await resp.json();
-    if (!body.ok) throw new Error(body.error || `HTTP ${resp.status}`);
+    if (!body.ok || !body.data || !body.data.consensus || !body.data.windows) throw new Error(body.error || '接口数据结构异常');
     render(body.data);
+    const stamp = body.data.server_time ? new Date(body.data.server_time).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '--';
+    $('#asOfText').textContent = `${body.data.refresh_status === 'stale' ? '旧快照' : '数据更新'} ${stamp}`;
+    if (body.data.refresh_status === 'stale') showError(`本次刷新失败：${body.data.refresh_error}。已显示旧快照，交易提示暂停。`);
   } catch (e) {
-    showError(`加载失败：${e.message}`);
+    showError(e.name === 'AbortError' ? '加载超时：数据源响应较慢，请点击刷新重试。' : `加载失败：${e.message}`);
+    $('#asOfText').textContent = '刷新失败，可重试';
+    $('#verdict').textContent = '暂停交易提示';
+    $('#verdictSay').textContent = '本次数据未能完成更新，暂不使用旧画面判断买卖。';
+    $('#actions').textContent = '数据未完成更新，观察线暂停。';
   } finally {
+    clearTimeout(timeout);
     $('#refreshButton').disabled = false;
-    $('#asOfText').textContent = new Date().toLocaleTimeString('zh-CN');
+    $('#refreshButton').textContent = '刷新';
   }
 }
 

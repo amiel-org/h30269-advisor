@@ -6,20 +6,23 @@
 //   * eastmoney       RPTA_WEB_TREASURYYIELD -> 10Y China government yield
 //
 // The bond series is forward-filled from PAST observations only.
-import { buildSignals, ladderExposure, metrics, percentileOfHistory,
-         runBacktest, windowTargets } from "./hs300-model.js";
+import { DEFAULT_CONFIG, buildSignals, metrics, percentileOfHistory, runBacktest } from "./hs300-model.js";
+import { conditionalLevels, confirmationState, dataQuality, signalDetail, valuationTable } from "./hs300-decision.js";
 
 const CSI_PERF = "https://www.csindex.com.cn/csindex-home/perf/index-perf";
 const EM_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36";
 
-async function fetchJson(url, { referer, timeoutMs = 25000, retries = 3 } = {}) {
+async function fetchJson(url, { referer, timeoutMs = 12000, retries = 1, signal } = {}) {
   const headers = { "User-Agent": UA };
   if (referer) headers.Referer = referer;
   let lastError;
   for (let attempt = 1; attempt <= retries; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const abort = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    signal?.addEventListener("abort", abort, { once: true });
     try {
       const resp = await fetch(url, { headers, signal: controller.signal });
       if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`);
@@ -29,6 +32,7 @@ async function fetchJson(url, { referer, timeoutMs = 25000, retries = 3 } = {}) 
       if (attempt < retries) await new Promise((r) => setTimeout(r, 400 * attempt));
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
     }
   }
   throw lastError;
@@ -40,7 +44,7 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function fetchCsiSeries(code, startDate, endDate, timeoutMs = 20000) {
+export async function fetchCsiSeries(code, startDate, endDate, timeoutMs = 18000, signal) {
   const url = new URL(CSI_PERF);
   url.searchParams.set("indexCode", code);
   url.searchParams.set("startDate", startDate);
@@ -48,7 +52,7 @@ export async function fetchCsiSeries(code, startDate, endDate, timeoutMs = 20000
   const payload = await fetchJson(url.toString(), {
     referer: `https://www.csindex.com.cn/zh-CN/indices/index-detail/${code}`,
     timeoutMs,
-    retries: 2,
+    retries: 1, signal,
   });
   if (String(payload.code) !== "200") throw new Error(`csindex ${code}: ${payload.msg}`);
   const rows = [];
@@ -77,13 +81,13 @@ function bondPageUrl(page) {
 
 // Live intraday quote for the price index.  PRESENTATION ONLY -- the model
 // deliberately never uses an unsettled intraday price for a signal.
-export async function fetchIntraday(code) {
+export async function fetchIntraday(code, signal) {
   const url = new URL("https://www.csindex.com.cn/csindex-home/perf/index-perf-oneday");
   url.searchParams.set("indexCode", code);
   try {
     const payload = await fetchJson(url.toString(), {
       referer: `https://www.csindex.com.cn/zh-CN/indices/index-detail/${code}`,
-      retries: 1,
+      retries: 1, timeoutMs: 5000, signal,
     });
     const h = (payload.data || {}).intraDayHeader || {};
     const raw = String(h.tradeDate || "");
@@ -102,319 +106,165 @@ export async function fetchIntraday(code) {
   }
 }
 
-export async function fetchBond10y() {
-  // Newest-first, 500 rows/page, ~20 pages back to 2002.  A single page covers
-  // only ~2 years and would silently drop every older price row, so we must
-  // paginate.  Pages are fetched CONCURRENTLY: serial fetching of 20 pages was
-  // slow enough to hit the request timeout on a cold cache.
-  const pages = 20;
-  const results = await Promise.all(
-    Array.from({ length: pages }, (_, i) =>
-      fetchJson(bondPageUrl(i + 1), { retries: 2 }).catch(() => null)),
-  );
+export async function fetchBond10y(signal) {
+  const first = await fetchJson(bondPageUrl(1), { signal });
+  const pages = Number(first.result?.pages);
+  if (!first.success || !Number.isInteger(pages) || pages < 1 || pages > 100) throw new Error("国债分页元数据异常");
+  const required = Math.min(pages, 20);
+  const rest = await Promise.all(Array.from({ length: required - 1 }, (_, i) =>
+    fetchJson(bondPageUrl(i + 2), { signal })));
   const out = {};
-  for (const payload of results) {
-    if (!payload) continue;
-    const data = (payload.result || {}).data || [];
-    for (const row of data) {
-      const v = num(row.EMM00166466);
-      if (v === null) continue;
-      out[String(row.SOLAR_DATE).slice(0, 10).replace(/-/g, "")] = v;
+  for (const payload of [first, ...rest]) {
+    if (!payload.success || !Array.isArray(payload.result?.data) || !payload.result.data.length) {
+      throw new Error("国债历史分页缺失，拒绝使用残缺历史");
+    }
+    for (const row of payload.result.data) {
+      const value = num(row.EMM00166466);
+      const date = String(row.SOLAR_DATE).slice(0, 10).replaceAll("-", "");
+      if (value !== null && value > 0 && /^\d{8}$/.test(date)) out[date] = value;
     }
   }
+  if (Object.keys(out).sort()[0] > "20110601") throw new Error("国债历史未覆盖PE历史起点");
   return out;
 }
 
-// ---- align into the series shape the model expects ---- //
+const dayStamp = (s) => Date.parse(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`);
+function validDate(d) { return /^\d{8}$/.test(d) && Number.isFinite(dayStamp(d)) && compact(new Date(dayStamp(d))) === d; }
+
 export function alignSeries(priceRows, trRows, bond) {
   const trMap = new Map(trRows.map((r) => [r.date, r.close]));
-  const bondKeys = Object.keys(bond).sort();
+  const bondKeys = Object.keys(bond).filter(validDate).sort();
   const dates = [], tr = [], pe = [], spread = [];
+  const prices = new Map();
   for (const row of priceRows) {
+    if (!validDate(row.date)) throw new Error("指数日期格式异常");
+    if (prices.has(row.date) && JSON.stringify(prices.get(row.date)) !== JSON.stringify(row)) throw new Error("指数存在冲突重复行");
+    prices.set(row.date, row);
+  }
+  for (const row of [...prices.values()].sort((a, b) => a.date.localeCompare(b.date))) {
     const d = row.date;
-    // reject weekends (synthetic/carried rows from the API boundary)
-    const dow = new Date(`${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`).getUTCDay();
-    if (dow === 0 || dow === 6) continue;
-    if (row.pe === null) continue;
-    if (!trMap.has(d)) continue;
+    const dow = new Date(dayStamp(d)).getUTCDay();
+    if (dow === 0 || dow === 6 || row.pe === null || row.pe === undefined || !trMap.has(d)) continue;
+    if (![row.pe, row.close, trMap.get(d)].every((v) => Number.isFinite(v) && v > 0)) throw new Error("指数或PE数值异常");
     let lo = 0, hi = bondKeys.length;
     while (lo < hi) { const mid = (lo + hi) >> 1; if (bondKeys[mid] <= d) lo = mid + 1; else hi = mid; }
     const key = bondKeys[lo - 1];
-    if (key === undefined) continue;
-    dates.push(d); tr.push(Number(trMap.get(d))); pe.push(row.pe);
-    spread.push(100 / row.pe - bond[key]);
+    if (!key) continue;
+    if ((dayStamp(d) - dayStamp(key)) / 86400000 > 7) throw new Error(`国债历史在 ${d} 缺失超过7天`);
+    if (!Number.isFinite(bond[key]) || bond[key] <= 0) throw new Error("国债数值异常");
+    dates.push(d); tr.push(trMap.get(d)); pe.push(row.pe); spread.push(100 / row.pe - bond[key]);
   }
   return { dates, tr, pe, spread };
 }
 
-export function compact(d) { return d.toISOString().slice(0, 10).replace(/-/g, ""); }
+export function compact(d) { return d.toISOString().slice(0, 10).replaceAll("-", ""); }
+export const SETTLED_KEY = "hs300:settled:v3";
+const SETTLED_MAX_AGE_MS = 12 * 3600000;
 
-const SETTLED_KEY = "hs300:settled:v2";
-const SETTLED_MAX_AGE_MS = 20 * 60 * 60 * 1000;   // refetch once per day
-
-async function readSettled(env) {
-  if (!env || !env.H30269_KV) return null;
+function chinaNow(now) { return new Date(now.getTime() + 8 * 3600000); }
+async function readSettled(env, now) {
   try {
-    const raw = await env.H30269_KV.get(SETTLED_KEY);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    if (!obj.cached_at || Date.now() - Date.parse(obj.cached_at) > SETTLED_MAX_AGE_MS) return null;
-    if (!obj.series) return null;
-    obj.series.__settled_price = obj.settled_price ?? null;
-    obj.series.__bond_last = obj.bond_last ?? null;
-    return obj.series;
+    const raw = await env?.H30269_KV?.get(SETTLED_KEY);
+    const cached = raw ? JSON.parse(raw) : null;
+    const age = now.getTime() - Date.parse(cached?.cached_at);
+    if (!cached || !Number.isFinite(age) || age < 0 || age > SETTLED_MAX_AGE_MS) return null;
+    const s = cached.series;
+    if (!s || s.dates.length < 750 || ![s.pe, s.tr, s.spread].every((v) => Array.isArray(v) && v.length === s.dates.length && v.every(Number.isFinite))) return null;
+    if (!s.dates.every((d, i) => validDate(d) && (i === 0 || d > s.dates[i - 1])) ||
+      !s.pe.every((v) => v > 0) || !s.tr.every((v) => v > 0)) return null;
+    if (!(cached.settled_price > 0) || !(cached.bond_last > 0) || !validDate(cached.bond_date || "")) return null;
+    const cn = chinaNow(now);
+    if (cn.getUTCDay() > 0 && cn.getUTCDay() < 6 && cn.getUTCHours() * 60 + cn.getUTCMinutes() >= 15 * 60 + 10 && s.dates.at(-1) < compact(cn)) return null;
+    return cached;
   } catch { return null; }
 }
 
-async function writeSettled(env, series, settledPrice, bondLast) {
-  if (!env || !env.H30269_KV) return;
-  try {
-    await env.H30269_KV.put(SETTLED_KEY, JSON.stringify({
-      cached_at: new Date().toISOString(),
-      series, settled_price: settledPrice, bond_last: bondLast,
-    }));
-  } catch { /* best effort */ }
+async function writeSettled(env, value) {
+  try { await env?.H30269_KV?.put(SETTLED_KEY, JSON.stringify(value)); } catch { /* best effort */ }
 }
 
-export async function buildHs300Result(env = null) {
-  const today = new Date();
-  const end = compact(today);
-  // PE history on csindex starts 2011-06; fetch a bit earlier so the expanding
-  // window has its full population and the backtest covers the whole period.
-  const startDate = new Date(today.getTime() - 5800 * 86400000);
-  const start = compact(startDate);
-
-  // ---- settled history: cached, because csindex can take ~50s for 1.4MB ----
-  const [cached, intradayRaw] = await Promise.all([
-    readSettled(env),
-    fetchIntraday("000300"),
-  ]);
-
-  let series;
-  let historySource;
-  // hoisted to function scope: the live-bar derivation below needs both, and on
-  // a cache HIT they would otherwise be block-scoped and undefined.
-  let priceRows = null;
-  let bond = null;
-  let settledBasePrice = null;
-  let settledBond = null;
-  if (cached && cached.dates && cached.dates.length >= 750) {
-    series = cached;
-    settledBasePrice = cached.__settled_price || null;
-    settledBond = cached.__bond_last || null;
-    historySource = "cache";
-  } else {
-    // Hard cap: if csindex hangs, fail fast so the caller can serve the last
-    // good cached dashboard instead of making the user wait ~50s.
-    const fetchHistory = Promise.all([
-      fetchCsiSeries("000300", start, end),
-      fetchCsiSeries("H00300", start, end),
-      fetchBond10y(),
+export async function buildHs300Result(env = null, { now = new Date(), signal } = {}) {
+  const cn = chinaNow(now), end = compact(cn);
+  // Fetch the quote and daily history concurrently, with a shared cancellation
+  // signal. Fixed history start keeps the expanding window stable over time.
+  const quotePromise = fetchIntraday("000300", signal);
+  let settled = await readSettled(env, now);
+  let historySource = "cache";
+  if (!settled) {
+    const [priceRaw, trRaw, bondRaw] = await Promise.all([
+      fetchCsiSeries("000300", "20100101", end, 18000, signal),
+      fetchCsiSeries("H00300", "20100101", end, 18000, signal),
+      fetchBond10y(signal),
     ]);
-    let trRows;
-    [priceRows, trRows, bond] = await Promise.race([
-      fetchHistory,
-      new Promise((_, rej) =>
-        setTimeout(() => rej(new Error("history fetch exceeded 30s")), 30000)),
-    ]);
-    series = alignSeries(priceRows, trRows, bond);
-    if (series.dates.length < 750) throw new Error(`insufficient history: ${series.dates.length}`);
-    const pxByDate = new Map(priceRows.map((r) => [r.date, r.close]));
-    settledBasePrice = pxByDate.get(series.dates[series.dates.length - 1]) || null;
-    const bk = Object.keys(bond).sort();
-    settledBond = bond[bk[bk.length - 1]] ?? null;
-    await writeSettled(env, series, settledBasePrice, settledBond);
+    const complete = (r) => r.date < end || (r.date === end && cn.getUTCHours() * 60 + cn.getUTCMinutes() >= 15 * 60 + 10);
+    const priceRows = priceRaw.filter(complete), trRows = trRaw.filter(complete);
+    const bond = Object.fromEntries(Object.entries(bondRaw).filter(([d]) => d <= end));
+    const series = alignSeries(priceRows, trRows, bond);
+    if (series.dates.length < 750) throw new Error(`历史不足: ${series.dates.length}`);
+    const last = series.dates.at(-1);
+    const bondDate = Object.keys(bond).sort().filter((d) => d <= last).at(-1);
+    settled = { series, settled_price: priceRows.find((r) => r.date === last)?.close,
+      bond_last: bond[bondDate], bond_date: bondDate, cached_at: now.toISOString() };
+    await writeSettled(env, settled);
     historySource = "live";
   }
+  const quote = await quotePromise;
+  return resultFromSettled(settled, quote, { now, historySource });
+}
 
+export function resultFromSettled(settled, quote = null, { now = new Date(), historySource = "cache" } = {}) {
+  const series = settled.series;
+  const last = series.dates.length - 1;
   const signals = buildSignals(series);
   const run = runBacktest(series, undefined, signals, 1);
   const m = metrics(run.curve);
-
-  const settledLast = series.dates.length - 1;
-
-  // ---- merge the LIVE intraday quote as a provisional bar ----
-  // The model runs on H00300 (total return) because that compounds for real,
-  // but csindex only publishes an intraday feed for the price index 000300.
-  // We therefore scale H00300 and PE by the 000300 move: intraday dividend
-  // accrual is a few basis points and cannot move a 12.5% ladder step.
-  let liveSeries = series;
-  let quoteStatus = "\u6536\u76d8\u540e";
-  let intraday = null;
-  let liveNote = null;
-  try {
-    const nextDate = intradayRaw ? intradayRaw.date : null;
-    if (nextDate && nextDate > series.dates[settledLast]) {
-      // On a cache hit priceRows is absent, so use the persisted settled price.
-      // Resolve the settled price-index level.  On a warm cache priceRows is
-      // absent, so fall back to the persisted value; if even that is missing,
-      // scale H00300 back by its own price/TR ratio is impossible, so skip the
-      // live bar rather than inventing a number.
-      let basePx = null;
-      if (priceRows) {
-        const closeByDate = new Map(priceRows.map((r) => [r.date, r.close]));
-        basePx = closeByDate.get(series.dates[settledLast]);
-      }
-      if (basePx === null || basePx === undefined) basePx = settledBasePrice;
-      if (basePx) {
-        const ratio = intradayRaw.level / basePx;
-        // on a cache hit `bond` is null; the persisted last yield is used
-        let yLive = settledBond;
-        if (bond) {
-          const bondKeys = Object.keys(bond).sort();
-          yLive = bond[bondKeys[bondKeys.length - 1]];
-        }
-        const trLive = series.tr[settledLast] * ratio;
-        const peLive = series.pe[settledLast] * ratio;
-        liveSeries = {
-          dates: [...series.dates, nextDate],
-          tr: [...series.tr, trLive],
-          pe: [...series.pe, peLive],
-          spread: [...series.spread, 100 / peLive - yLive],
-        };
-        quoteStatus = "\u76d8\u4e2d";
-        intraday = { ...intradayRaw, ratio: +ratio.toFixed(6),
-                     tr_level: +trLive.toFixed(2), pe_live: +peLive.toFixed(4),
-                     bond_10y: yLive };
-        liveNote = `\u76d8\u4e2d\u4f30\u503c\uff1a\u6309 000300 \u5b9e\u65f6\u4ef7\u6309\u6bd4\u4f8b\u63a8\u7b97 H00300 \u4e0e PE\uff08\u6bd4\u4f8b ${ratio.toFixed(4)}\uff09\u3002`;
-      }
-    }
-  } catch (e) {
-    liveSeries = series; quoteStatus = "\u6536\u76d8\u540e"; intraday = null;
-    liveNote = `\u76d8\u4e2d\u6570\u636e\u63a5\u5165\u5931\u8d25\uff0c\u5df2\u56de\u9000\u5230\u6700\u540e\u6536\u76d8\u65e5\uff1a${e.message}`;
-  }
-
-  const liveLast = liveSeries.dates.length - 1;
-  const peHist = liveSeries.pe.slice(0, liveLast);
-  const erpHist = liveSeries.spread.slice(0, liveLast);
-  const peNow = liveSeries.pe[liveLast];
-  const erpNow = liveSeries.spread[liveLast];
-
-  const cur = windowTargets(peHist, erpHist, peNow, erpNow);
+  const cur = signalDetail(series);
   const windows = {};
   for (const [key, w] of Object.entries(cur.windows)) {
-    windows[key] = {
-      label: w.label,
-      pe_percentile: w.pePercentile,
-      erp_percentile: w.erpPercentile,
-      exposure: w.exposure,
-    };
+    windows[key] = { label: w.label, pe_percentile: w.pePercentile, erp_percentile: w.erpPercentile, exposure: w.exposure };
   }
-  const pePct = percentileOfHistory(peHist, peNow);
-  const erpPct = percentileOfHistory(erpHist, erpNow);
-
-  const priceNow = intraday ? intraday.level
-    : (settledBasePrice != null ? settledBasePrice
-      : (priceRows && priceRows.length ? priceRows[priceRows.length - 1].close : null));
-
-  // ---- boundary table computed SERVER-SIDE (front end must not recompute) ----
-  const pools = {};
-  for (const spec of WINDOW_SPECS_FOR_BANDS) {
-    const src = spec.mode === "rolling" && spec.days > 0 ? peHist.slice(-spec.days) : peHist;
-    pools[spec.name] = [...src].sort((a, b) => a - b);
-  }
-  const pctOf = (name, p) => {
-    const pool = pools[name];
-    const qv = pool.length ? quantile(pool, p) : null;
-    return { pe: qv === null ? null : +qv.toFixed(4),
-             level: (qv === null || !priceNow) ? null : +(priceNow * qv / peNow).toFixed(1) };
-  };
-
-  // `boundaries` = the LOWER edge of each ladder band (the trigger line).
-  const boundaries = [];
-  for (const pctBoundary of [70, 60, 50, 40, 30]) {
-    const row = { pct: pctBoundary, levels: {}, pe: {},
-                  target_below: ladderExposure(pctBoundary - 0.001, LADDER_FOR_BANDS),
-                  target_above: ladderExposure(pctBoundary, LADDER_FOR_BANDS) };
-    for (const spec of WINDOW_SPECS_FOR_BANDS) {
-      const q = pctOf(spec.name, pctBoundary);
-      row.pe[spec.name] = q.pe;
-      row.levels[spec.name] = q.level;
-    }
-    boundaries.push(row);
-  }
-
-  // `ladder` = every band with its target and trigger level, so the front end
-  // has NOTHING hard-coded.  The bottom band has no lower edge.
-  const ladder = [];
-  for (const [n, minPct] of [[0, 70], [1, 60], [2, 50], [3, 40], [4, 30], [5, 0]]) {
-    const target = LADDER_FOR_BANDS[n].exposure;
-    const lo = minPct === 0 ? null : minPct;
-    const row = { lo, target, pe: {}, levels: {} };
-    for (const spec of WINDOW_SPECS_FOR_BANDS) {
-      if (lo === null) { row.pe[spec.name] = null; row.levels[spec.name] = null; continue; }
-      const q = pctOf(spec.name, lo);
-      row.pe[spec.name] = q.pe;
-      row.levels[spec.name] = q.level;
-    }
-    ladder.push(row);
-  }
-
-  const priceAsOf = series.dates[settledLast];
-  const live = quoteStatus === "\u76d8\u4e2d";
-
+  const today = compact(chinaNow(now));
+  const intraday = quote && quote.date === today && quote.date >= series.dates[last] && quote.level > 0 ? quote : null;
+  const cn = chinaNow(now), minute = cn.getUTCHours() * 60 + cn.getUTCMinutes();
+  const quoteTime = intraday?.time?.match(/(\d{1,2}):(\d{2})/);
+  const quoteAge = quoteTime ? minute - (Number(quoteTime[1]) * 60 + Number(quoteTime[2])) : Infinity;
+  const marketSession = (minute >= 570 && minute <= 690) || (minute >= 780 && minute <= 900);
+  const live = Boolean(intraday && marketSession && quoteAge >= 0 && quoteAge <= 15);
+  const quality = dataQuality(series, settled.bond_date, now);
+  const first = series.dates.indexOf(m.start);
+  const buyHold = series.dates.slice(first).map((d, i) => [d, series.tr[first + i] / series.tr[first]]);
+  const table = valuationTable(series, settled.settled_price);
+  const conditional = quality.actionable ? conditionalLevels(series, settled.settled_price, settled.bond_last) : null;
+  const average = run.exposures.reduce((a, b) => a + b, 0) / run.exposures.length;
+  // A fixed INITIAL allocation drifts over time; it is a budget comparison,
+  // not a volatility-matched benchmark (average exposure is known ex post).
+  const matched = buyHold.map(([d, nav]) => [d, 1 - average + average * nav]);
   return {
-    as_of: liveSeries.dates[liveLast],
-    price_asof: priceAsOf,
-    quote_status: quoteStatus,
-    history_source: historySource,
-    live,
-    live_note: liveNote,
-    intraday,
-    price_index: { code: "000300", level: priceNow },
-    total_return_index: { code: "H00300", level: liveSeries.tr[liveLast] },
-    pe: +peNow.toFixed(4),
-    pe_percentile: +pePct.toFixed(2),
-    erp: +erpNow.toFixed(4),
-    erp_percentile: +erpPct.toFixed(2),
-    windows,
-    consensus: { agreed: cur.agreed, exposure: cur.consensus_exposure,
-                 vote: cur.vote, span: cur.span },
-    target_exposure: cur.consensus_exposure,
-    boundaries,
-    ladder,
-    backtest: {
-      cagr_calendar_pct: m.cagrCalendarPct,
-      max_drawdown_pct: m.maxDrawdownPct,
-      sharpe: m.sharpe,
-      trades: run.steps.length,
-      avg_exposure: +(run.exposures.reduce((a, b) => a + b, 0) / run.exposures.length).toFixed(4),
-      start: m.start, end: m.end,
-    },
-    chart: {
-      dates: series.dates.slice(-500),
-      price: series.tr.slice(-500),
-      pe: series.pe.slice(-500),
-      exposure: run.exposures.slice(-500),
-    },
+    model_version: DEFAULT_CONFIG.version,
+    as_of: series.dates[last], price_asof: series.dates[last],
+    quote_status: live ? "盘中报价仅供观察" : "已收盘数据",
+    history_source: historySource, live, intraday,
+    price_index: { code: "000300", level: settled.settled_price },
+    total_return_index: { code: "H00300", level: series.tr[last] },
+    pe: +series.pe[last].toFixed(4),
+    pe_percentile: +percentileOfHistory(series.pe.slice(0, -1), series.pe[last]).toFixed(2),
+    erp: +series.spread[last].toFixed(4),
+    erp_percentile: +percentileOfHistory(series.spread.slice(0, -1), series.spread[last]).toFixed(2),
+    bond: { value: settled.bond_last, as_of: settled.bond_date }, quality,
+    windows, consensus: { agreed: cur.agreed, exposure: cur.consensus_exposure, vote: cur.vote, span: cur.span },
+    target_exposure: cur.consensus_exposure, execution: confirmationState(signals),
+    ...table, conditional_levels: conditional,
+    backtest: { cagr_calendar_pct: m.cagrCalendarPct, max_drawdown_pct: m.maxDrawdownPct,
+      sharpe: m.sharpe, trades: run.steps.length, avg_exposure: +average.toFixed(4),
+      start: m.start, end: m.end, buy_hold: metrics(buyHold), budget_comparison: metrics(matched) },
+    chart: { dates: series.dates.slice(-500), price: series.tr.slice(-500), pe: series.pe.slice(-500), exposure: run.exposures.slice(-500) },
     disclosures: [
-      "策略预算口径：仓位是划给沪深300策略资金池的比例，不是家庭总资产比例。",
-      "多窗口一致口径：全历史 / 近10年 / 近5年 三窗口结论一致才给信号，分歧时保持仓位不动。",
-      "样本内研究：参数在历史区间内确定，非干净样本外，无实盘业绩。",
-      "最大回撤自净值高点计算，不代表本金亏损上限。",
+      "仓位以沪深300策略专用资金池为分母，不是家庭总资产；本页面未读取你的真实持仓。",
+      "正式信号仅使用已发布的收盘数据，盘中报价不参与确认。买入1次收盘确认、卖出2次连续收盘确认，次一交易日收盘执行，每次最多调整12.5个百分点，5个百分点以内不调仓。",
+      "三窗口均有足够历史且目标一致才给目标仓位；分歧仅表示模型不调仓，不能据此断言市场没有投资优势。",
+      "研究参数在同一历史样本中选择，没有干净样本外验证，也没有经核实的实盘业绩。历史回测不代表未来收益。",
+      "回测使用全收益指数，交易单边费用5bp，现金收益0；未扣基金管理费、跟踪误差和额外冲击成本。夏普按252日、无风险收益0估算。",
+      "等初始预算比较中的比例来自事后平均仓位，不是波动率匹配，也不是可提前获得的最优比例。最大回撤不代表未来亏损上限。",
     ],
   };
-}
-
-// ---- band-table helpers (server-side only) ---- //
-const LADDER_FOR_BANDS = [
-  { min_pct: 70, exposure: 0.0 },
-  { min_pct: 60, exposure: 0.125 },
-  { min_pct: 50, exposure: 0.375 },
-  { min_pct: 40, exposure: 0.625 },
-  { min_pct: 30, exposure: 0.875 },
-  { min_pct: 0, exposure: 1.0 },
-];
-
-const WINDOW_SPECS_FOR_BANDS = [
-  { name: "full", mode: "expanding" },
-  { name: "10y", mode: "rolling", days: 2440 },
-  { name: "5y", mode: "rolling", days: 1220 },
-];
-
-function quantile(pool, pct) {
-  if (!pool || !pool.length) return null;
-  const s = [...pool].sort((a, b) => a - b);
-  const idx = Math.min(s.length - 1, Math.max(0, Math.floor((pct / 100) * s.length)));
-  return s[idx];
 }

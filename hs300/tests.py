@@ -8,16 +8,31 @@ and confirmation gating.
 from __future__ import annotations
 
 import unittest
+import copy
 
 from data import align
 from model import (Account, Config, Series, build_signals, ladder_exposure,
                    metrics, percentile_of_history, quantize_down, run_backtest,
                    target_exposure)
+from model import HOLD, window_targets
 
 CFG = Config.load()
 
 
 class TestAllocation(unittest.TestCase):
+    def test_partial_windows_are_not_consensus(self):
+        raw = copy.deepcopy(CFG.raw)
+        raw["indicators"]["percentile_windows"][0]["min_obs"] = 1
+        detail = window_targets([10], [5], 10, 5, Config(raw))
+        self.assertFalse(detail["agreed"])
+        self.assertEqual(detail["consensus_exposure"], HOLD)
+
+    def test_nonfinite_values_rejected(self):
+        with self.assertRaises(ValueError):
+            percentile_of_history([10], float("nan"))
+        with self.assertRaises(ValueError):
+            target_exposure(float("inf"), 50, CFG)
+
     def test_ladder_boundaries(self):
         lad = CFG.ladder
         cases = [(100, 0.0), (70, 0.0), (69.99, 0.125), (60, 0.125),
@@ -125,6 +140,21 @@ class TestLookAhead(unittest.TestCase):
 
 
 class TestExecution(unittest.TestCase):
+    def test_sell_confirmation_exact_dates(self):
+        s = Series(dates=["20260105", "20260106", "20260107", "20260108", "20260109", "20260112"],
+                   tr=[1] * 6, pe=[10] * 6, spread=[5] * 6)
+        run = run_backtest(s, CFG, signals=[1, 1, 0, 0, 0, 0], lag=1)
+        self.assertEqual(next(x.date for x in run.steps if x.kind == "sell"), "20260109")
+        reset = run_backtest(s, CFG, signals=[1, 0, HOLD, 0, 0, 0], lag=1)
+        self.assertEqual(next(x.date for x in reset.steps if x.kind == "sell"), "20260112")
+
+    def test_metrics_scale_invariance_and_single_observation(self):
+        a = metrics([("20250101", 1), ("20260101", 2)])
+        b = metrics([("20250101", 5), ("20260101", 10)])
+        self.assertEqual(a["cagr_calendar_pct"], b["cagr_calendar_pct"])
+        self.assertEqual(a["cagr_252_pct"], b["cagr_252_pct"])
+        self.assertIsNone(metrics([("20250101", 1)])["cagr_252_pct"])
+
     def test_gradual_steps_one_grid_per_day(self):
         series = align()
         signals = [1.0] * len(series)          # force full target immediately

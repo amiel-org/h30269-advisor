@@ -1,5 +1,5 @@
 {
-  "version": "v2.3",
+  "version": "v2.4",
   "as_of": "2026-10-15",
   "data": {
     "price_index": "000300",
@@ -84,7 +84,7 @@
       "quantize": "floor"
     },
     "combine": "strict",
-    "note": "每个窗口各自算 min(pe_ladder, erp_gate)。三窗口目标完全一致才给信号；不一致（含相差 1 档）则 HOLD，保持仓位不动。实测：放宽容差会让年化从 8.33% 单调降到 5.7%，因为分歧多发生在估值中间地带。",
+    "note": "每个窗口各自算 min(pe_ladder, erp_gate)。三窗口历史均充足且目标完全一致才给信号；不一致（含相差1档）则 HOLD。该规则在同一历史样本中比较后选择，仍属于样本内研究，不能据此证明未来优势。",
     "tolerance_steps": 0,
     "tolerance_rule": "conservative"
   },

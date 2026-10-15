@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""HS300 decision model v2.0 -- single source of truth.
+"""HS300 decision model -- Python reference using the shared config.json.
 
 Design rules (frozen, see config.json):
-  * every quantity that drives a trade is computed from data available strictly
-    before the decision day (percentiles exclude the current observation);
+  * a signal uses the published daily observation, compared with a historical
+    pool strictly preceding it (percentiles exclude the current observation);
   * the model emits a DISCRETE target exposure on a fixed grid;
   * signals are produced at day t close and filled at day t+1 close;
   * the account is tracked as equity + cash, so no-trade drift is realistic;
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
@@ -82,6 +83,8 @@ def quantize_down(value: float, grid: float) -> float:
 
 
 def target_exposure(pe_pct: float, erp_pct: float, cfg: "Config") -> float:
+    if not all(math.isfinite(x) for x in (pe_pct, erp_pct)):
+        raise ValueError("invalid percentile")
     lad = ladder_exposure(pe_pct, cfg.ladder)
     gate = erp_gate(erp_pct, cfg.gate_lo, cfg.gate_hi)
     return quantize_down(min(lad, gate), cfg.grid)
@@ -91,6 +94,8 @@ def percentile_of_history(history: Sequence[float], current: float) -> float:
     """Percentile of `current` inside `history` (history must exclude current)."""
     if not history:
         raise ValueError("empty history")
+    if not math.isfinite(current):
+        raise ValueError("invalid percentile input")
     return 100.0 * sum(x <= current for x in history) / len(history)
 
 
@@ -142,7 +147,7 @@ def window_targets(pe_hist: Sequence[float], erp_hist: Sequence[float],
     # agreement, and take the CONSERVATIVE end of that cluster.
     tol = cfg.tolerance_steps * cfg.grid
     span = (max(values) - min(values)) if values else None
-    within = bool(values) and span <= tol + 1e-9
+    within = len(values) == len(cfg.windows) and bool(values) and span <= tol + 1e-9
     if within:
         chosen = min(values) if cfg.tolerance_rule == "conservative" else values[0]
     else:
@@ -352,8 +357,8 @@ def metrics(curve: Sequence[tuple[str, float]], periods_per_year: int = 252) -> 
     return {
         "start": curve[0][0], "end": curve[-1][0],
         "years_calendar": round(years, 4),
-        "cagr_calendar_pct": round((values[-1] ** (1 / years) - 1) * 100, 4) if years > 0 else None,
-        "cagr_252_pct": round((values[-1] ** (periods_per_year / len(values)) - 1) * 100, 4),
+        "cagr_calendar_pct": round(((values[-1] / values[0]) ** (1 / years) - 1) * 100, 4) if years > 0 else None,
+        "cagr_252_pct": round(((values[-1] / values[0]) ** (periods_per_year / len(rets)) - 1) * 100, 4) if rets else None,
         "max_drawdown_pct": round(mdd * 100, 4),
         "sharpe": round(mean / sd * (periods_per_year ** 0.5), 4) if sd > 0 else None,
         "end_nav": round(values[-1], 6),

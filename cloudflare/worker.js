@@ -1,5 +1,6 @@
 import config from "../config.json" with { type: "json" };
 import { getHs300Dashboard, refreshHs300 } from "./lib/hs300-dashboard.js";
+import { DEFAULT_CONFIG as hs300Config } from "./lib/hs300-model.js";
 
 const CSI_BASE = "https://www.csindex.com.cn/csindex-home";
 const DANJUAN_URL = "https://danjuanfunds.com/djapi/index_eva/detail/CSIH30269";
@@ -889,7 +890,7 @@ async function handleRequest(request, env) {
   }
   // ---- HS300 decision desk ---- //
   if (url.pathname === "/api/hs300/health" && request.method === "GET") {
-    return jsonResponse({ ok: true, time: chinaIso(), model_version: "hs300-v2.3", runtime: "cloudflare-worker" });
+    return jsonResponse({ ok: true, time: chinaIso(), model_version: `hs300-${hs300Config.version}`, runtime: "cloudflare-worker" });
   }
   if (url.pathname === "/api/hs300/dashboard" && request.method === "GET") {
     return jsonResponse({ ok: true, data: await getHs300Dashboard(env, false) });
