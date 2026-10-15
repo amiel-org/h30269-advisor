@@ -237,18 +237,41 @@ export async function buildHs300Result() {
     const src = spec.mode === "rolling" && spec.days > 0 ? peHist.slice(-spec.days) : peHist;
     pools[spec.name] = [...src].sort((a, b) => a - b);
   }
+  const pctOf = (name, p) => {
+    const pool = pools[name];
+    const qv = pool.length ? quantile(pool, p) : null;
+    return { pe: qv === null ? null : +qv.toFixed(4),
+             level: (qv === null || !priceNow) ? null : +(priceNow * qv / peNow).toFixed(1) };
+  };
+
+  // `boundaries` = the LOWER edge of each ladder band (the trigger line).
   const boundaries = [];
   for (const pctBoundary of [70, 60, 50, 40, 30]) {
-    const row = { pct: pctBoundary, levels: {}, pe: {}, target_below: null, target_above: null };
+    const row = { pct: pctBoundary, levels: {}, pe: {},
+                  target_below: ladderExposure(pctBoundary - 0.001, LADDER_FOR_BANDS),
+                  target_above: ladderExposure(pctBoundary, LADDER_FOR_BANDS) };
     for (const spec of WINDOW_SPECS_FOR_BANDS) {
-      const pool = pools[spec.name];
-      const qv = pool.length ? quantile(pool, pctBoundary) : null;
-      row.pe[spec.name] = qv === null ? null : +qv.toFixed(4);
-      row.levels[spec.name] = (qv === null || !priceNow) ? null : +(priceNow * qv / peNow).toFixed(1);
+      const q = pctOf(spec.name, pctBoundary);
+      row.pe[spec.name] = q.pe;
+      row.levels[spec.name] = q.level;
     }
-    row.target_below = ladderExposure(pctBoundary - 0.001, LADDER_FOR_BANDS);
-    row.target_above = ladderExposure(pctBoundary, LADDER_FOR_BANDS);
     boundaries.push(row);
+  }
+
+  // `ladder` = every band with its target and trigger level, so the front end
+  // has NOTHING hard-coded.  The bottom band has no lower edge.
+  const ladder = [];
+  for (const [n, minPct] of [[0, 70], [1, 60], [2, 50], [3, 40], [4, 30], [5, 0]]) {
+    const target = LADDER_FOR_BANDS[n].exposure;
+    const lo = minPct === 0 ? null : minPct;
+    const row = { lo, target, pe: {}, levels: {} };
+    for (const spec of WINDOW_SPECS_FOR_BANDS) {
+      if (lo === null) { row.pe[spec.name] = null; row.levels[spec.name] = null; continue; }
+      const q = pctOf(spec.name, lo);
+      row.pe[spec.name] = q.pe;
+      row.levels[spec.name] = q.level;
+    }
+    ladder.push(row);
   }
 
   const priceAsOf = series.dates[settledLast];
@@ -272,6 +295,7 @@ export async function buildHs300Result() {
                  vote: cur.vote, span: cur.span },
     target_exposure: cur.consensus_exposure,
     boundaries,
+    ladder,
     backtest: {
       cagr_calendar_pct: m.cagrCalendarPct,
       max_drawdown_pct: m.maxDrawdownPct,

@@ -79,8 +79,10 @@ function renderActions(d) {
                    `</span>`;
     return li;
   };
-  const levelsOf = (b) => ORDER.filter((k) => b.levels && b.levels[k] !== null && b.levels[k] !== undefined)
-    .map((k) => `${WNAME[k]} ≤ ${lvl(b.levels[k])}`).join(' 或 ');
+  // direction matters: a buy trigger fires on a FALL (<=), a sell on a RISE (>=)
+  const levelsOf = (b, dir) => ORDER
+    .filter((k) => b.levels && b.levels[k] !== null && b.levels[k] !== undefined)
+    .map((k) => `${WNAME[k]} ${dir} ${lvl(b.levels[k])}`).join(' 或 ');
 
   // next buy: the highest boundary strictly BELOW current percentile
   const buys = bounds.filter((b) => b.pct < cur).sort((a, b) => b.pct - a.pct);
@@ -90,7 +92,7 @@ function renderActions(d) {
   if (buys.length) {
     const b = buys[0];
     host.appendChild(row('buy', `加仓到 ${(b.target_below * 100).toFixed(1)}%`,
-      `<b>沪深300 跌到这些点位时</b>`, levelsOf(b)));
+      `<b>沪深300 跌到这些点位时</b>`, levelsOf(b, '≤')));
   } else {
     host.appendChild(row('hold', '已是底档', '没有更低的加仓线了。', ''));
   }
@@ -98,7 +100,7 @@ function renderActions(d) {
   if (sells.length) {
     const b = sells[0];
     host.appendChild(row('sell', `减仓到 ${(b.target_above * 100).toFixed(1)}%`,
-      `<b>沪深300 涨到这些点位时</b>`, levelsOf(b)));
+      `<b>沪深300 涨到这些点位时</b>`, levelsOf(b, '≥')));
   } else {
     host.appendChild(row('hold', '暂无减仓线', '还没进入减仓区间。', ''));
   }
@@ -127,28 +129,33 @@ function renderWindows(d) {
 }
 
 // ---------- 阶梯表 ----------
+// Renders VERBATIM what the server computed.  No band table is hard-coded here:
+// if the ladder in config.json changes, this table follows automatically.
 function renderLadder(d) {
   const tbody = $('#ladder tbody');
   tbody.innerHTML = '';
   const cur = d.pe_percentile;
-  const bounds = d.boundaries || [];
-  // bands derived for DISPLAY ONLY from the boundary rows (no model maths)
-  const rows = [
-    { lo: 70, hi: 100, target: 0.0 },
-    { lo: 60, hi: 70, target: 0.125 },
-    { lo: 50, hi: 60, target: 0.375 },
-    { lo: 40, hi: 50, target: 0.625 },
-    { lo: 30, hi: 40, target: 0.875 },
-    { lo: 0, hi: 30, target: 1.0 },
-  ];
-  for (const r of rows) {
-    // the 0-30% band has no boundary row (no lower edge), so its cells are blank
-    const b = bounds.find((x) => x.pct === r.lo);
+  const rows = d.ladder || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5">数据缺失</td></tr>';
+    return;
+  }
+  for (let i = 0; i < rows.length; i += 1) {
+    const r = rows[i];
+    const upper = i > 0 ? rows[i - 1].lo : null;
+    const isCur = r.lo === null
+      ? (cur < (rows[i - 1] ? rows[i - 1].lo : 100))
+      : (cur >= r.lo && (upper === null || cur < upper));
+    // A band's range is [r.lo, upper).  Labelling it "below r.lo" would be
+    // wrong by one band -- that is the NEXT band down.
+    const lo = r.lo;
+    let label;
+    if (r.target === 0) label = `PE分位 ${lo}% 以上（很贵）`;
+    else if (r.target === 1) label = `PE分位 ${upper}% 以下（很便宜）`;
+    else label = `PE分位 ${lo}%–${upper}%`;
+    const cells = ORDER.map((k) => `<td class="num">${lvl(r.levels ? r.levels[k] : null)}</td>`).join('');
     const tr = document.createElement('tr');
-    if (cur >= r.lo && cur < r.hi) tr.className = 'cur';
-    const label = r.target === 0 ? '很贵 → 空仓'
-      : (r.target === 1 ? '很便宜 → 满仓' : `PE分位 ${r.lo}%–${r.hi}%`);
-    const cells = ORDER.map((k) => `<td class="num">${b && b.levels ? lvl(b.levels[k]) : '--'}</td>`).join('');
+    if (isCur) tr.className = 'cur';
     tr.innerHTML = `<td>${label}</td><td class="num">${(r.target * 100).toFixed(1)}%</td>${cells}`;
     tbody.appendChild(tr);
   }
