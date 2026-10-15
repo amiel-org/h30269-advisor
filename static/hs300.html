@@ -1,148 +1,54 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light">
-<title>H30269 &amp; HS300 双决策台</title>
-<link rel="stylesheet" href="/static/app.css">
-<style>
-  .hs-tabs { display:flex; gap:8px; }
-  .hs-tabs a { text-decoration:none; padding:6px 14px; border-radius:8px; font-size:14px;
-    color:#4b5563; border:1px solid #e5e7eb; background:#fff; }
-  .hs-tabs a.active { background:#111827; color:#fff; border-color:#111827; }
-  .hs-wrap { max-width:1040px; margin:0 auto; }
-  .hs-card { border:1px solid #e5e7eb; border-radius:12px; padding:16px 18px; background:#fff; margin:14px 0; }
-  .hs-card h3 { margin:0 0 4px; font-size:15px; }
-  .hs-card .hint { font-size:12px; color:#6b7280; margin-bottom:12px; }
-  .hs-hero { border-radius:14px; padding:22px 24px; margin:16px 0; color:#fff;
-    background:linear-gradient(135deg,#0f172a,#1e293b); }
-  .hs-hero.wait { background:linear-gradient(135deg,#78350f,#b45309); }
-  .hs-hero .lbl { font-size:13px; opacity:.8; }
-  .hs-hero .big { font-size:40px; font-weight:800; letter-spacing:-.02em; margin:2px 0 6px; }
-  .hs-hero .say { font-size:15px; line-height:1.65; opacity:.95; }
-  .hs-fresh { border-radius:10px; padding:10px 14px; font-size:13px; margin:12px 0;
-    border:1px solid #fde68a; background:#fffbeb; color:#92400e; }
-  .hs-fresh.ok { border-color:#a7f3d0; background:#f0fdf4; color:#065f46; }
-  .hs-win { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; }
-  .hs-win .w { border:1px solid #e5e7eb; border-radius:12px; padding:14px; background:#fff; }
-  .hs-win .w .n { font-size:13px; color:#374151; font-weight:600; }
-  .hs-win .w .p { font-size:26px; font-weight:800; margin:4px 0 2px; }
-  .hs-win .w .e { font-size:12px; color:#6b7280; }
-  .hs-win .w.ag { border-color:#34d399; background:#f0fdf4; }
-  .hs-win .w.dis { border-color:#fbbf24; background:#fffbeb; }
-  .hs-acts { list-style:none; padding:0; margin:6px 0 0; }
-  .hs-acts li { display:flex; gap:12px; align-items:flex-start; padding:12px 0;
-    border-bottom:1px solid #f1f5f9; font-size:14px; }
-  .hs-acts li:last-child { border-bottom:none; }
-  .hs-acts .tag { flex:0 0 76px; font-size:12px; font-weight:700; padding:3px 8px;
-    border-radius:6px; text-align:center; }
-  .hs-acts .tag.now { background:#dbeafe; color:#1e40af; }
-  .hs-acts .tag.buy { background:#dcfce7; color:#166534; }
-  .hs-acts .tag.sell { background:#fee2e2; color:#991b1b; }
-  .hs-acts .tag.hold { background:#f3f4f6; color:#4b5563; }
-  table.hs-ladder { width:100%; border-collapse:collapse; font-size:14px; }
-  table.hs-ladder th, table.hs-ladder td { padding:10px 8px; border-bottom:1px solid #f1f5f9; text-align:left; }
-  table.hs-ladder th { font-size:12px; color:#6b7280; font-weight:600; }
-  table.hs-ladder td.num { text-align:right; font-variant-numeric:tabular-nums; }
-  table.hs-ladder tr.cur { background:#fff7ed; font-weight:700; }
-  .hs-err { display:none; background:#fef2f2; color:#991b1b; border:1px solid #fecaca;
-    border-radius:8px; padding:10px 14px; margin:12px 0; font-size:14px; }
-  .hs-btn { border:1px solid #e5e7eb; background:#fff; border-radius:8px; padding:6px 12px; cursor:pointer; font-size:14px; }
-  .hs-btn:hover { background:#f9fafb; }
-  .hs-acts .body { min-width:0; overflow-wrap:anywhere; }
-  @media(max-width:600px) {
-    .hs-wrap .topbar { grid-template-columns:1fr auto; height:auto; min-height:90px; gap:10px; padding:12px; }
-    .hs-wrap .brand { grid-column:1; grid-row:1; }
-    .hs-wrap .brand-copy strong { font-size:13px; }
-    .hs-wrap .hs-tabs { grid-column:1; grid-row:2; }
-    .hs-wrap .top-actions { grid-column:2; grid-row:1 / 3; }
-    .hs-wrap .market-state { display:block; max-width:90px; white-space:normal; font-size:10px; }
-    .hs-hero .big { font-size:32px; }
-    table.hs-ladder { font-size:12px; }
-    table.hs-ladder th, table.hs-ladder td { padding:9px 4px; }
-  }
-</style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light">
+<title>沪深300 · 盘中决策台</title>
+<link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/hs300.css">
 </head>
-<body>
-<div class="app-shell hs-wrap">
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark" aria-hidden="true"><i data-lucide="line-chart"></i></span>
-      <div class="brand-copy">
-        <strong>H30269 &amp; HS300</strong>
-        <span>沪深300 · 决策台 v2.4.1</span>
-      </div>
-    </div>
-    <nav class="hs-tabs" aria-label="决策台切换">
-      <a href="/">红利低波</a>
-      <a href="/hs300" class="active">沪深300</a>
-    </nav>
-    <div class="top-actions">
-      <div class="market-state"><span id="asOfText" role="status">读取中</span></div>
-      <button id="refreshButton" class="hs-btn" title="刷新">刷新</button>
-    </div>
-  </header>
-
-  <div id="errorBanner" class="hs-err" role="alert"></div>
-  <div id="freshBanner" class="hs-fresh" style="display:none"></div>
-
-  <section class="hs-hero" id="hero">
-    <div class="lbl">现在该怎么做</div>
-    <div class="big" id="verdict">--</div>
-    <div class="say" id="verdictSay">加载中…</div>
-  </section>
-
-  <section class="hs-card">
-    <h3>下一收盘日的条件观察线</h3>
-    <div class="hint">同时检查三窗口、PE 和股债利差。盈利与国债收益率保持不变时的估算，不能直接当作买卖挂单。</div>
-    <ul class="hs-acts" id="actions"><li>加载中…</li></ul>
-  </section>
-
-  <section class="hs-card">
-    <h3>三个时间窗口怎么看</h3>
-    <div class="hint">用不同长度的历史判断"贵不贵"。三者看法一致才动手，不一致就等。</div>
-    <div class="hs-win" id="windows"></div>
-  </section>
-
-  <section class="hs-card">
-    <h3>PE 估值参考阶梯</h3>
-    <div class="hint">表内仓位仅是 PE 上限；实际目标还受 ERP 闸门、三窗口一致和收盘确认约束。</div>
-    <table class="hs-ladder" id="ladder">
-      <thead><tr>
-        <th>情形</th><th class="num">PE 仓位上限</th>
-        <th class="num">区间下沿（全历史）</th><th class="num">区间下沿（近10年）</th><th class="num">区间下沿（近5年）</th>
-      </tr></thead>
-      <tbody><tr><td colspan="5">加载中…</td></tr></tbody>
-    </table>
-  </section>
-
-  <section class="hs-card">
-    <h3>正式收盘估值</h3>
-    <table class="hs-ladder"><tbody>
-      <tr><td>沪深300 收盘点位</td><td class="num" id="px">--</td></tr>
-      <tr><td>滚动市盈率 PE</td><td class="num" id="pe">--</td></tr>
-      <tr><td>PE 历史分位</td><td class="num" id="pep">--</td></tr>
-      <tr><td>股债利差 ERP</td><td class="num" id="erp">--</td></tr>
-    </tbody></table>
-  </section>
-
-  <section class="hs-card">
-    <h3>历史表现（样本内模拟）</h3>
-    <div class="hint" id="backtestPeriod">参数使用该历史区间选择，无独立样本外验证或实盘业绩。</div>
-    <table class="hs-ladder"><tbody>
-      <tr><td>年化收益</td><td class="num" id="cagr">--</td></tr>
-      <tr><td>最大回撤</td><td class="num" id="mdd">--</td></tr>
-      <tr><td>夏普比率</td><td class="num" id="sharpe">--</td></tr>
-      <tr><td>平均仓位 / 调仓次数</td><td class="num" id="avgExp">--</td></tr>
-      <tr><td>同期满仓持有：年化 / 最大回撤</td><td class="num" id="buyHold">--</td></tr>
-    </tbody></table>
-  </section>
-
-  <div class="hs-fresh" id="disclosure" style="border-color:#e5e7eb;background:#f9fafb;color:#6b7280"></div>
-</div>
-
-<script src="/static/vendor/lucide.min.js"></script>
-<script type="module" src="/static/hs300.js"></script>
-</body>
-</html>
+<body class="hs-desk">
+<div class="app-shell">
+<header class="topbar">
+  <div class="brand"><span class="brand-mark"><i data-lucide="chart-candlestick"></i></span><div class="brand-copy"><strong>H30269 &amp; HS300</strong><span>沪深300 · 盘中决策台 v2.5</span></div></div>
+  <nav class="hs-tabs" aria-label="决策台切换"><a href="/">红利低波</a><a href="/hs300" class="active">沪深300</a></nav>
+  <div class="top-actions"><span id="asOfText" role="status">读取中</span><button id="autoButton" class="hs-btn active" aria-pressed="true">自动 30秒</button><button id="refreshButton" class="hs-btn">刷新</button></div>
+</header>
+<main class="hs-main">
+<div id="errorBanner" class="hs-error" role="alert" hidden></div>
+<section class="decision-bar" aria-label="当前分析摘要">
+ <div class="decision-bar-item primary"><i data-lucide="activity"></i><div><span>当前判断</span><strong id="topVerdict">读取中</strong></div></div>
+ <div class="decision-bar-item"><div><span>当前分析点位</span><strong id="topPrice">--</strong></div></div>
+ <div class="decision-bar-item"><div><span>估算 PE / 分位</span><strong id="topPe">--</strong></div></div>
+ <div class="decision-bar-item"><div><span>股债利差 ERP</span><strong id="topErp">--</strong></div></div>
+ <div class="decision-bar-item"><div><span>报价时间 · 北京时间</span><strong id="topQuoteTime">--</strong></div></div>
+</section>
+<div id="freshBanner" class="hs-fresh" role="status">正在获取最新报价与历史基准</div>
+<section class="market-stage">
+ <div class="chart-stage">
+  <div class="stage-head"><div><span class="section-label">000300 · 价格指数</span><h1>沪深300 日K与均线</h1></div><div class="trend-actions"><div class="segmented" role="group" aria-label="图表模式"><button class="active" data-mode="candles">K线</button><button data-mode="line">收盘</button><button data-mode="intraday">分时</button></div><div class="segmented" role="group" aria-label="图表范围"><button data-range="66">3月</button><button class="active" data-range="132">6月</button><button data-range="260">1年</button></div></div></div>
+  <div class="price-summary"><div class="latest-price"><span id="priceLabel">当前点位</span><strong id="closeValue">--</strong><em id="closeDate">--</em></div><div class="ohlc-readout"><span>开 <b id="openValue">--</b></span><span>高 <b id="highValue">--</b></span><span>低 <b id="lowValue">--</b></span><span>现 <b id="ohlcCloseValue">--</b></span><span>涨跌 <b id="changeValue">--</b></span></div></div>
+  <div class="hs-chart-key"><span><i class="key-red"></i>红涨绿跌</span><span><i class="key-blue"></i>MA20</span><span><i class="key-orange"></i>MA60</span><span><i class="key-green"></i>MA250</span><span id="chartNotice">加载真实行情</span></div>
+  <div class="chart-wrap"><div id="priceChart" class="kline-chart" role="img" aria-label="沪深300日K、均线及条件观察线"></div><div id="chartEmpty" hidden>暂未取得图表行情，请稍后刷新。</div></div>
+  <div id="maRuler" class="ma-ruler"></div>
+ </div>
+ <aside id="hero" class="action-rail tone-hold">
+  <div class="rail-head"><div><span>当前辅助判断</span><strong id="analysisMode">--</strong></div><span id="quoteBadge" class="confidence-badge">等待行情</span></div>
+  <div class="rail-decision"><span class="rail-index">01</span><h2 id="verdict">正在分析</h2><p id="verdictSay">正在对齐当前点位、估值与历史窗口</p></div>
+  <div class="hs-target"><span>三窗口目标仓位</span><strong id="targetExposure">--</strong><small id="targetDetail">策略资金池口径</small></div>
+  <div class="hs-position"><label for="positionInput">你的当前仓位 <small>占策略资金池</small></label><div><input id="positionInput" type="number" min="0" max="100" step="0.1" placeholder="例如 37.5" inputmode="decimal"><span>%</span></div></div>
+  <div class="position-action"><i data-lucide="route"></i><div><span>本次可考虑的调整</span><p id="positionAdvice">填入实际仓位后计算</p></div></div>
+  <div class="hs-baseline"><span>上次正式收盘对照</span><strong id="settledSummary">--</strong><small id="confirmationText">--</small></div>
+  <div class="hs-rail-note">盘中方案即时随报价变化，本日实际执行最多一档。此处不记录成交，不能按刷新次数重复下单。原收盘策略的历史业绩不能代表盘中交易结果。</div>
+ </aside>
+</section>
+<section class="hs-support">
+ <div class="hs-section hs-lines"><div class="hs-section-head"><span class="section-label">当前点位下的条件边界</span><h2>下一步盯哪里</h2></div><ul id="actions" class="hs-actions"><li>正在计算观察线</li></ul></div>
+ <div class="hs-section hs-windows"><div class="hs-section-head"><span class="section-label">同一时刻 · 三种历史窗口</span><h2>估值判断是否一致</h2></div><div id="windows" class="hs-window-grid"></div><p class="hs-muted">窗口目标一致才给统一目标；分歧表示这套规则暂不调仓，不代表市场没有机会。</p></div>
+</section>
+<section class="hs-detail">
+ <div class="hs-section"><div class="hs-section-head"><span class="section-label">估值与股债比较</span><h2>当前测算 / 正式收盘</h2></div><table class="hs-table"><thead><tr><th>指标</th><th>当前测算</th><th>正式收盘</th></tr></thead><tbody><tr><td>沪深300点位</td><td id="px">--</td><td id="basePx">--</td></tr><tr><td>PE</td><td id="pe">--</td><td id="basePe">--</td></tr><tr><td>PE历史分位</td><td id="pep">--</td><td id="basePep">--</td></tr><tr><td>ERP</td><td id="erp">--</td><td id="baseErp">--</td></tr></tbody></table><p id="valuationNote" class="hs-muted">--</p></div>
+ <div class="hs-section"><div class="hs-section-head"><span class="section-label">价格变化 → PE阶梯 → ERP闸门</span><h2>PE 估值参考阶梯</h2></div><div class="hs-table-scroll"><table id="ladder" class="hs-table"><thead><tr><th>PE分位</th><th>仓位上限</th><th>全历史下沿</th><th>近10年下沿</th><th>近5年下沿</th></tr></thead><tbody></tbody></table></div><p class="hs-muted">这是PE上限，实际目标还须经过ERP闸门及三窗口共识；表格点位不是直接交易指令。</p></div>
+</section>
+<section class="hs-section hs-research"><div class="hs-section-head"><span class="section-label">原收盘规则 · 样本内模拟</span><h2>历史表现与适用范围</h2></div><p id="backtestPeriod" class="hs-muted">--</p><div class="hs-research-grid"><div><span>年化收益</span><strong id="cagr">--</strong></div><div><span>最大回撤</span><strong id="mdd">--</strong></div><div><span>夏普比率</span><strong id="sharpe">--</strong></div><div><span>平均仓位 / 调仓</span><strong id="avgExp">--</strong></div><div><span>满仓持有：年化 / 回撤</span><strong id="buyHold">--</strong></div></div><details><summary>查看估值假设与模型边界</summary><p id="disclosure"></p></details></section>
+</main></div>
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script><script src="/static/vendor/lucide.min.js"></script><script type="module" src="/static/hs300.js"></script>
+</body></html>

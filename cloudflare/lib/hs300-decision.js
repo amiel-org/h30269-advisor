@@ -38,14 +38,16 @@ function upperBound(pool, value) {
 // the historical pool. Earnings and the dated bond yield are held constant.
 // Every PE/ERP rank discontinuity is scanned, so no coarse price grid can miss
 // a narrow interval in which all windows agree.
-export function conditionalLevels(series, price, bond, cfg = DEFAULT_CONFIG) {
+export function conditionalLevels(series, price, bond, cfg = DEFAULT_CONFIG, context = {}) {
   if (!(price > 0) || !Number.isFinite(bond)) return { buy: null, sell: null, reason: "missing inputs" };
-  const currentPe = series.pe.at(-1);
+  const currentPe = context.peNow ?? series.pe.at(-1);
+  const peHistory = context.peHist ?? series.pe;
+  const erpHistory = context.erpHist ?? series.spread;
   const factor = price / currentPe;
   const pools = cfg.indicators.percentile_windows.map((spec) => {
-    const count = spec.mode === "rolling" ? spec.days : series.pe.length;
-    return { spec, pe: series.pe.slice(-count).sort((a, b) => a - b),
-      erp: series.spread.slice(-count).sort((a, b) => a - b) };
+    const count = spec.mode === "rolling" ? spec.days : peHistory.length;
+    return { spec, pe: peHistory.slice(-count).sort((a, b) => a - b),
+      erp: erpHistory.slice(-count).sort((a, b) => a - b) };
   });
   const evaluatePe = (pe) => {
     const targets = pools.map(({ spec, pe: ph, erp: eh }) => {
@@ -56,7 +58,7 @@ export function conditionalLevels(series, price, bond, cfg = DEFAULT_CONFIG) {
     if (targets.some((v) => v === null)) return HOLD;
     return Math.max(...targets) - Math.min(...targets) <= 1e-9 ? targets[0] : HOLD;
   };
-  const detail = signalDetail(series, cfg);
+  const detail = context.detail ?? signalDetail(series, cfg);
   const todayTargets = Object.values(detail.windows).map((w) => w.exposure).filter(Number.isFinite);
   if (todayTargets.length !== pools.length) return { buy: null, sell: null, reason: "insufficient windows" };
   const currentMin = Math.min(...todayTargets), currentMax = Math.max(...todayTargets);
@@ -84,7 +86,7 @@ export function conditionalLevels(series, price, bond, cfg = DEFAULT_CONFIG) {
   return {
     buy: find("buy"), sell: find("sell"),
     reference_min: currentMin, reference_max: currentMax,
-    assumption: "仅估算下一收盘日：保持盈利、10年国债收益率不变，并把本次收盘纳入历史。实际数据更新后须重新确认；不等于限价单。",
+    assumption: context.assumption ?? "仅估算下一收盘日：保持盈利、10年国债收益率不变，并把本次收盘纳入历史。实际数据更新后须重新确认；不等于限价单。",
   };
 }
 

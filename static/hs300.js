@@ -1,262 +1,78 @@
-// HS300 decision desk front end.
-//
-// Performs NO model maths: every number comes from /api/hs300/dashboard, which
-// is produced by the same hs300-model.js the backtest uses.
-
-const $ = (s) => document.querySelector(s);
-const pct = (v, d = 1) => (v === null || v === undefined ? '--' : `${Number(v).toFixed(d)}%`);
-const num = (v, d = 2) => (v === null || v === undefined ? '--' : Number(v).toFixed(d));
-const lvl = (v) => (v === null || v === undefined ? '--' : Number(v).toFixed(0));
-const ymd = (s) => (s && s.length === 8 ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : s);
-
-function showError(m) { const e = $('#errorBanner'); e.textContent = m; e.style.display = 'block'; }
-function clearError() { $('#errorBanner').style.display = 'none'; }
-
-const ORDER = ['full', '10y', '5y'];
-const WNAME = { full: '全历史', '10y': '近10年', '5y': '近5年' };
-const WPLAIN = { full: '全部历史（2011年至今）', '10y': '最近 10 年', '5y': '最近 5 年' };
-
-// ---------- 数据时效 ----------
-// Official decisions use settled daily observations. A dated quote is shown
-// separately and must never be presented as a confirmed trade signal.
-function renderFreshness(d) {
-  const el = $('#freshBanner');
-  const pxDay = ymd(d.price_asof || d.as_of);
-  const i = d.intraday;
-  el.style.display = 'block';
-  if (d.quality?.analysis_available && !d.quality.actionable) {
-    el.className = 'hs-fresh';
-    el.textContent = `分析依据：${pxDay} 已确认收盘，国债日期 ${ymd(d.bond?.as_of)}。` +
-      (d.quality.status === 'awaiting_close' ? '当天完整日线尚未取得，等待官方发布；下方保留上一收盘日分析，暂不生成新交易动作。' :
-        '本次数据源核验未完成，下方保留上一收盘日分析，暂不生成新交易动作。') +
-      (d.refresh_pending ? ' 正在后台核验，完成后页面会自动更新。' : ' 可稍后点击刷新核验。');
-  } else if (d.refresh_status === 'stale' || !d.quality?.actionable) {
-    el.className = 'hs-fresh';
-    el.textContent = `数据暂不可用于交易判断。最近收盘：${pxDay}；${(d.quality?.blockers || []).join('；')}`;
-  } else if (i) {
-    el.className = 'hs-fresh ok';
-    const chg = (i.change_pct === null || i.change_pct === undefined) ? ''
-      : '（' + (i.change_pct > 0 ? '+' : '') + num(i.change_pct, 2) + '%）';
-    el.innerHTML =
-      '<b>' + (d.live ? '盘中报价' : '最近报价') + '（' + ymd(i.date) + ' ' + (i.time || '') + '）</b>：沪深300 <b>' + lvl(i.level) + '</b>' + chg +
-      '。盘中报价仅供观察，<b>不参与正式买卖信号或连续收盘确认</b>。<br>' +
-      '<span style="opacity:.85">下方分位与目标仓位依据 ' + pxDay + ' 已发布收盘数据；国债日期 ' + ymd(d.bond?.as_of) + '。</span>';
-  } else {
-    el.className = 'hs-fresh ok';
-    el.innerHTML = '已收盘数据：<b>' + pxDay + '</b>（最近一个已收盘交易日）。' +
-      '国债日期 ' + ymd(d.bond?.as_of) + '。刷新可重新获取报价；正式信号等待新收盘数据。';
-  }
+import { initChartControls, renderMarketChart } from '/static/hs300-chart.js';
+const $=(s)=>document.querySelector(s);
+const num=(v,d=2)=>Number.isFinite(v)?v.toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d}):'--';
+const pct=(v,d=1)=>Number.isFinite(v)?`${num(v,d)}%`:'--';
+const ymd=(d)=>d?.length===8?`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`:d||'--';
+const ORDER=['full','10y','5y'];
+const LABEL={full:'全部历史', '10y':'近10年', '5y':'近5年'};
+let lastData=null,busy=false,pollTimer=null,polls=0,auto=true,localOffline=false;
+try { const v=localStorage.getItem('hs300.position'); if(v!==null)$('#positionInput').value=v; } catch {}
+const showError=(text)=>{$('#errorBanner').hidden=false;$('#errorBanner').textContent=text;};
+function quoteLabel(a){return {trading:'盘中即时测算',after_close:'收盘报价测算',lunch_break:'午间报价测算',before_open:'开盘前参考',delayed:'延迟报价测算',previous_session:'上一交易日报价',missing:'正式收盘参考',invalid:'行情时间异常'}[a.quote_quality?.status]||'当前点位测算';}
+function renderPosition(){
+ if(!lastData)return;
+ const a=lastData.analysis,c=a?.consensus||{},input=$('#positionInput');
+ const raw=input.value,w=Number(raw)/100;
+ if(raw===''||!Number.isFinite(w)||w<0||w>1){$('#positionAdvice').textContent='填入0–100%的实际仓位，计算与你的资金池对应的调整幅度。';return;}
+ if(!a.quality?.can_decide||localOffline){$('#positionAdvice').textContent=`${quoteLabel(a)}：可以看当前目标，但本次不生成可执行交易比例。开盘且报价及时后自动重算。`;return;}
+ if(!c.agreed||!Number.isFinite(c.exposure)){$('#positionAdvice').textContent='当前三窗口目标仍分歧：按这套规则暂不调仓。你的现仓已记录，目标一致后即时比较。';return;}
+ const gap=c.exposure-w,step=lastData.execution?.step_size||.125,deadband=lastData.execution?.deadband||.05;
+ if(Math.abs(gap)<=deadband+1e-9){$('#positionAdvice').textContent=`现仓 ${pct(w*100)}，目标 ${pct(c.exposure*100)}，差在5个百分点以内，暂不调整。`;return;}
+ const move=Math.min(Math.abs(gap),step),after=w+(gap>0?move:-move);
+ $('#positionAdvice').textContent=`盘中试算：可考虑${gap>0?'增加':'减少'} ${num(move*100,1)} 个百分点，仓位 ${pct(w*100)} → ${pct(after*100)}。本日实际执行最多一档；本页不记录成交，不要按多次刷新重复执行。`;
 }
-
-// ---------- 结论 ----------
-function renderVerdict(d) {
-  const hero = $('#hero');
-  const c = d.consensus || {};
-  if (!d.quality?.actionable) {
-    hero.classList.add('wait');
-    const reference = d.quality?.analysis_available;
-    $('#verdict').textContent = reference
-      ? (d.quality.status === 'awaiting_close' ? '等待新收盘数据' : '保留上次收盘分析') : '暂停交易提示';
-    const last = c.agreed && typeof c.exposure === 'number'
-      ? `三窗口目标 ${(c.exposure * 100).toFixed(1)}%` : '三窗口目标不一致，模型暂不调仓';
-    $('#verdictSay').textContent = reference
-      ? `${ymd(d.price_asof)} 收盘分析：${last}。新数据核验完成前不新增交易动作。`
-      : (d.quality?.blockers || ['数据未通过时效检查']).join('；');
-  } else if (c.agreed && typeof c.exposure === 'number') {
-    hero.classList.remove('wait');
-    $('#verdict').textContent = `目标仓位 ${(c.exposure * 100).toFixed(1)}%`;
-    const ex = d.execution || {};
-    $('#verdictSay').innerHTML =
-      `三个时间窗口目标一致，已连续 ${ex.confirmed_closes || 0} 个收盘日。<br>` +
-      `买入需 ${ex.buy_required} 日确认，卖出需 ${ex.sell_required} 日确认；满足后次一交易日收盘最多调整 12.5 个百分点。<br>` +
-      `这是策略资金池的目标，尚未结合你的实际仓位，不能直接等同本次买卖比例。`;
-  } else {
-    hero.classList.add('wait');
-    $('#verdict').textContent = '模型暂不调仓';
-    const w = d.windows || {};
-    const parts = ORDER.filter((k) => w[k]).map((k) => `${WNAME[k]} ${pct(w[k].pe_percentile)}`);
-    const gap = (d.consensus && d.consensus.span !== undefined && d.consensus.span !== null)
-      ? `（三种看法相差 ${(d.consensus.span / 0.125).toFixed(0)} 档）` : '';
-    $('#verdictSay').innerHTML =
-      `三个时间窗口看法<b>不一致</b>${gap}：${parts.join(' · ')}。<br>` +
-      `按已冻结的规则保持现有仓位，等待三窗口目标一致。分歧本身不能证明市场没有投资机会。`;
-  }
+function render(data){
+ if(!data.analysis)throw new Error('盘中分析尚在升级，请稍后刷新');
+ const a=data.analysis,c=a.consensus||{},available=a.quality?.available,stale=!a.quality?.can_decide;
+ const agreed=c.agreed&&Number.isFinite(c.exposure);
+ const title=!available?'数据待恢复':agreed?`目标 ${pct(c.exposure*100)}`:'暂不调仓';
+ $('#verdict').textContent=title;$('#topVerdict').textContent=title;
+ $('#analysisMode').textContent=quoteLabel(a);
+ $('#quoteBadge').textContent=localOffline?'连接中断':a.quote_quality?.status==='trading'?'行情及时':a.quote_quality?.status==='delayed'?'行情延迟':'最近报价';
+ $('#hero').className=`action-rail ${agreed&&c.exposure>=.625?'tone-buy':agreed&&c.exposure<=.125?'tone-sell':'tone-hold'}`;
+ const targets=ORDER.map(k=>`${LABEL[k]} ${pct(a.windows?.[k]?.exposure*100)}`).join(' / ');
+ $('#verdictSay').textContent=agreed?`当前点位 ${num(a.price)}，三窗口目标一致。填入你的现仓，可立即比较增减方向。${stale?' 当前为参考测算。':''}`:`当前点位下三个目标分歧：${targets}。按现有规则保持仓位，继续盯下方观察线。`;
+ $('#targetExposure').textContent=agreed?pct(c.exposure*100):'窗口分歧';
+ $('#targetDetail').textContent=agreed?'目标占沪深300策略资金池的比例':'各窗口目标见下方，不能取平均冒充统一结论';
+ $('#topPrice').textContent=num(a.price);$('#topPe').textContent=`${num(a.pe)} / ${pct(a.pe_percentile)}`;$('#topErp').textContent=pct(a.erp,2);
+ $('#topQuoteTime').textContent=`${ymd(a.date)} ${a.time||'日线'}`;
+ $('#closeValue').textContent=num(a.price);$('#closeValue').className=a.change_pct>=0?'up':'down';$('#closeDate').textContent=`${ymd(a.date)} ${a.time||''} · ${a.source}`;
+ $('#priceLabel').textContent=a.mode==='quote_estimate'?'当前报价':'收盘基准';
+ const fresh=$('#freshBanner');fresh.className=`hs-fresh${stale||data.source_warning||localOffline?' warning':''}`;
+ fresh.textContent=`${quoteLabel(a)} · ${ymd(a.date)} ${a.time||''} · ${a.source}。PE ${num(a.pe)}、ERP ${pct(a.erp,2)}、三窗口目标均按该点位计算。盈利基准 ${ymd(a.baseline.date)}；国债 ${ymd(a.bond.as_of)}。`+(data.source_warning?' 历史基准核验暂不可用，当前结果带此限制。':'')+(a.quote_quality?.status==='delayed'?' 报价已延迟，暂停新增动作。':'')+(localOffline?' 连接暂未恢复，当前为上次报价分析。':'');
+ $('#settledSummary').textContent=`${ymd(data.price_asof)} · ${num(data.price_index?.level)} · PE ${num(data.pe)}`;
+ const ex=data.execution||{};$('#confirmationText').textContent=`原收盘策略：同目标已确认 ${ex.confirmed_closes||0} 次收盘。盘中刷新不增加确认次数。`;
+ $('#px').textContent=num(a.price);$('#pe').textContent=num(a.pe);$('#pep').textContent=pct(a.pe_percentile);$('#erp').textContent=pct(a.erp,2);
+ $('#basePx').textContent=num(data.price_index?.level);$('#basePe').textContent=num(data.pe);$('#basePep').textContent=pct(data.pe_percentile);$('#baseErp').textContent=pct(data.erp,2);
+ $('#valuationNote').textContent=a.assumptions;
+ $('#windows').replaceChildren(...ORDER.map(k=>{const w=a.windows[k],div=document.createElement('div');div.className=`hs-window ${c.agreed?'agreed':''}`;div.innerHTML=`<div class="name">${LABEL[k]}</div><div class="value">${pct(w?.pe_percentile)}</div><div class="detail">PE 分位<br>ERP 分位 ${pct(w?.erp_percentile)}</div><div class="expo">目标 ${pct(w?.exposure*100)}</div>`;return div;}));
+ const actions=$('#actions');actions.replaceChildren();
+ for(const [kind,label]of[['buy','加仓观察'],['sell','减仓观察']]){
+  const line=a.conditional_levels?.[kind],li=document.createElement('li');
+  const distance=line?.level>0?(line.level/a.price-1)*100:null;
+  li.innerHTML=`<span class="tag ${kind}">${label}</span><span class="body">${line?`<b>${num(line.level,0)}</b> 距当前 ${distance>0?'+':''}${pct(distance,2)}<small>该点位三窗口目标 ${pct(line.target*100)}；每次最多12.5个百分点，需结合真实仓位。</small>`:'当前假设下暂无对应的统一观察线。'}</span>`;actions.append(li);
+ }
+ const note=document.createElement('li');note.innerHTML='<span class="tag">测算假设</span><span class="body"></span>';note.querySelector('.body').textContent=a.conditional_levels?.assumption||'等待足够的数据，暂不生成观察线。';actions.append(note);
+ const rows=data.ladder||[];$('#ladder tbody').replaceChildren(...rows.map((r,i)=>{const hi=rows[i-1]?.lo??100,lo=r.lo??0,tr=document.createElement('tr');if(a.pe_percentile>=lo&&a.pe_percentile<(i===0?101:hi))tr.className='current';tr.innerHTML=`<td>${r.lo===null?`低于${hi}%`:i===0?`≥${lo}%`:`${lo}–${hi}%`}</td><td>${pct(r.target*100)}</td>${ORDER.map(k=>`<td>${num(r.levels?.[k],0)}</td>`).join('')}`;return tr;}));
+ const bt=data.backtest||{};$('#cagr').textContent=pct(bt.cagr_calendar_pct,2);$('#mdd').textContent=pct(bt.max_drawdown_pct,2);$('#sharpe').textContent=num(bt.sharpe);$('#avgExp').textContent=`${pct(bt.avg_exposure*100)} / ${bt.trades??'--'} 次`;$('#buyHold').textContent=`${pct(bt.buy_hold?.cagrCalendarPct,2)} / ${pct(bt.buy_hold?.maxDrawdownPct,2)}`;
+ $('#backtestPeriod').textContent=`${ymd(bt.start)} 至 ${ymd(bt.end)}。这是收盘规则的样本内结果，盘中辅助方案没有独立盘中验证或实盘业绩。`;
+ $('#disclosure').textContent=(data.disclosures||[]).join(' ');
+ renderMarketChart(data);renderPosition();if(window.lucide)window.lucide.createIcons();
 }
-
-// ---------- 动作清单：下一买点 / 下一卖点 ----------
-// Uses the server's conditional_levels: PE + ERP + all configured windows.
-function renderActions(d) {
-  const host = $('#actions');
-  host.innerHTML = '';
-
-  const row = (cls, tag, head, sub) => {
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="tag ${cls}">${tag}</span>` +
-                   `<span class="body">${head}` +
-                   (sub ? `<div style="color:#6b7280;font-size:13px;margin-top:4px">${sub}</div>` : '') +
-                   `</span>`;
-    return li;
-  };
-  if (!d.quality?.actionable && !d.quality?.analysis_available) {
-    host.appendChild(row('hold', '暂停', '数据不可用于交易判断，暂不展示买卖观察线。', ''));
-    return;
-  }
-  const levels = d.conditional_levels || {};
-  const reference = !d.quality?.actionable;
-  if (reference) host.appendChild(row('hold', '历史参考',
-    `${ymd(d.price_asof)} 收盘分析的条件观察线，等待新数据后重新计算。`, '本轮不据此生成交易动作。'));
-  for (const [kind, label] of [['buy', '加仓观察'], ['sell', '减仓观察']]) {
-    const line = levels[kind];
-    host.appendChild(row(kind, label, line
-      ? `条件估算点位 <b>${lvl(line.level)}</b>；三窗口目标均为 <b>${(line.target * 100).toFixed(1)}%</b>`
-      : '当前假设下没有找到对应观察线。',
-      line ? '点位处同时检查了 PE 与 ERP。还须满足收盘确认、真实仓位差和每次一档的限制，越过该价位后需重新计算。' : ''));
-  }
-  host.appendChild(row('now', '估算前提', levels.assumption || '等待下一次正式收盘后复核。', ''));
+async function request(url,method,ms){const c=new AbortController(),timer=setTimeout(()=>c.abort(),window.HS300_REQUEST_TIMEOUT_MS||ms);try{const r=await fetch(url,{method,cache:'no-store',signal:c.signal});if(!r.ok){const e=new Error(`接口返回 HTTP ${r.status}`);e.retryable=r.status>=500;throw e;}return await r.json();}finally{clearTimeout(timer);}}
+async function load(force=false){
+ if(busy)return;busy=true;clearTimeout(pollTimer);$('#refreshButton').disabled=true;$('#refreshButton').textContent='刷新中…';$('#errorBanner').hidden=true;$('#errorBanner').textContent='';
+ try{let body;try{body=await request(force?'/api/hs300/refresh':'/api/hs300/dashboard',force?'POST':'GET',force?16000:28000);}catch(e){if(!e.retryable&&e.name!=='AbortError'&&!(e instanceof TypeError))throw e;body=await request('/api/hs300/dashboard','GET',7000);}
+ if(!body.ok||!body.data?.analysis||!body.data?.consensus)throw new Error(body.error||'接口数据结构异常');
+ lastData=body.data;localOffline=false;render(lastData);$('#asOfText').textContent=body.data.refresh_pending?'更新报价中':`${ymd(lastData.analysis.date)} ${lastData.analysis.time||'收盘'}`;
+ if(body.data.refresh_pending&&polls<6){polls++;pollTimer=setTimeout(()=>load(false),2500);}else polls=0;
+ }catch(e){showError(e.name==='AbortError'?'加载超时：已保留上次分析，请稍后重试。':`加载失败：${e.message}`);$('#asOfText').textContent='连接失败，可重试';localOffline=true;
+ if(lastData){render(lastData);}else{$('#verdict').textContent='数据待恢复';$('#verdictSay').textContent='暂未取得可分析行情，请点击刷新重试。';}
+ }finally{busy=false;$('#refreshButton').disabled=false;$('#refreshButton').textContent='刷新';}
 }
-
-// ---------- 三窗口 ----------
-function renderWindows(d) {
-  const host = $('#windows');
-  host.innerHTML = '';
-  const w = d.windows || {};
-  const agreed = d.consensus && d.consensus.agreed;
-  for (const k of ORDER) {
-    if (!w[k]) continue;
-    const div = document.createElement('div');
-    div.className = 'w ' + (agreed ? 'ag' : 'dis');
-    const expo = w[k].exposure === null ? '--' : `${(w[k].exposure * 100).toFixed(1)}%`;
-    div.innerHTML =
-      `<div class="n">${WPLAIN[k]}</div>` +
-      `<div class="p">${pct(w[k].pe_percentile)}</div>` +
-      `<div class="e">ERP 分位 ${pct(w[k].erp_percentile)} · 目标仓位 ${expo}</div>`;
-    host.appendChild(div);
-  }
-}
-
-// ---------- 阶梯表 ----------
-// Renders VERBATIM what the server computed.  No band table is hard-coded here:
-// if the ladder in config.json changes, this table follows automatically.
-function renderLadder(d) {
-  const tbody = $('#ladder tbody');
-  tbody.innerHTML = '';
-  const cur = d.pe_percentile;
-  const rows = d.ladder || [];
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5">数据缺失</td></tr>';
-    return;
-  }
-  for (let i = 0; i < rows.length; i += 1) {
-    const r = rows[i];
-    const upper = i > 0 ? rows[i - 1].lo : null;
-    const isCur = r.lo === null
-      ? (cur < (rows[i - 1] ? rows[i - 1].lo : 100))
-      : (cur >= r.lo && (upper === null || cur < upper));
-    // A band's range is [r.lo, upper).  Labelling it "below r.lo" would be
-    // wrong by one band -- that is the NEXT band down.
-    const lo = r.lo;
-    let label;
-    if (r.target === 0) label = `PE分位 ${lo}% 以上（很贵）`;
-    else if (r.target === 1) label = `PE分位 ${upper}% 以下（很便宜）`;
-    else label = `PE分位 ${lo}%–${upper}%`;
-    const cells = ORDER.map((k) => `<td class="num">${lvl(r.levels ? r.levels[k] : null)}</td>`).join('');
-    const tr = document.createElement('tr');
-    if (isCur) tr.className = 'cur';
-    tr.innerHTML = `<td>${label}</td><td class="num">${(r.target * 100).toFixed(1)}%</td>${cells}`;
-    tbody.appendChild(tr);
-  }
-}
-
-function render(d) {
-  renderFreshness(d);
-  renderVerdict(d);
-  renderActions(d);
-  renderWindows(d);
-  renderLadder(d);
-
-  $('#px').textContent = lvl(d.price_index && d.price_index.level);
-  $('#pe').textContent = num(d.pe);
-  $('#pep').textContent = pct(d.pe_percentile);
-  $('#erp').textContent = pct(d.erp);
-
-  const bt = d.backtest || {};
-  $('#cagr').textContent = pct(bt.cagr_calendar_pct, 2);
-  $('#mdd').textContent = pct(bt.max_drawdown_pct, 2);
-  $('#sharpe').textContent = num(bt.sharpe, 2);
-  $('#avgExp').textContent = `${((bt.avg_exposure || 0) * 100).toFixed(1)}% / ${bt.trades} 次`;
-  $('#backtestPeriod').textContent = `${ymd(bt.start)} 至 ${ymd(bt.end)}，样本内研究；没有经核实的实盘业绩。`;
-  $('#buyHold').textContent = `${pct(bt.buy_hold?.cagrCalendarPct, 2)} / ${pct(bt.buy_hold?.maxDrawdownPct, 2)}`;
-
-  $('#disclosure').innerHTML = (d.disclosures || []).join('<br>');
-}
-
-async function load(force) {
-  clearTimeout(pollTimer);
-  clearError();
-  $('#refreshButton').disabled = true;
-  $('#refreshButton').textContent = '刷新中…';
-  $('#asOfText').textContent = force ? '正在更新数据' : '正在读取数据';
-  const request = async (url, method, milliseconds) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), window.HS300_REQUEST_TIMEOUT_MS || milliseconds);
-    try {
-      const response = await fetch(url, { method, cache: 'no-store', signal: controller.signal });
-      if (!response.ok) {
-        const error = new Error(`接口返回 HTTP ${response.status}`);
-        error.retryable = response.status >= 500;
-        throw error;
-      }
-      return await response.json();
-    } finally { clearTimeout(timeout); }
-  };
-  try {
-    const url = force ? '/api/hs300/refresh' : '/api/hs300/dashboard';
-    let body;
-    try { body = await request(url, force ? 'POST' : 'GET', force ? 15000 : 28000); }
-    catch (error) {
-      if (!error.retryable && error.name !== 'AbortError' && !(error instanceof TypeError)) throw error;
-      $('#asOfText').textContent = '连接波动，正在重试';
-      // A retry reads the existing dashboard, allowing its background refresh
-      // to finish without launching a second costly manual refresh.
-      body = await request('/api/hs300/dashboard', 'GET', 7000);
-    }
-    if (!body.ok || !body.data || !body.data.consensus || !body.data.windows) throw new Error(body.error || '接口数据结构异常');
-    render(body.data);
-    lastData = body.data;
-    const stamp = body.data.server_time ? new Date(body.data.server_time).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '--';
-    const reference = body.data.quality?.analysis_available && !body.data.quality.actionable;
-    $('#asOfText').textContent = body.data.refresh_pending ? '后台核验中' : reference
-      ? `参考 ${ymd(body.data.price_asof)}` : `${body.data.refresh_status === 'stale' ? '旧快照' : '数据更新'} ${stamp}`;
-    if (body.data.refresh_status === 'stale') showError(`本次刷新失败：${body.data.refresh_error}。已显示旧快照，交易提示暂停。`);
-    if (body.data.refresh_pending && pollCount < 5) {
-      pollCount += 1;
-      pollTimer = setTimeout(() => load(false), 3000);
-    } else if (!body.data.refresh_pending) pollCount = 0;
-  } catch (e) {
-    showError(e.name === 'AbortError' ? '加载超时：数据源响应较慢，请点击刷新重试。' : `加载失败：${e.message}`);
-    $('#asOfText').textContent = '刷新失败，可重试';
-    const day = lastData?.price_asof;
-    const stamp = day && Date.parse(`${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}T00:00:00+08:00`);
-    const age = stamp ? (Date.now() - stamp) / 86400000 : Infinity;
-    if (lastData && age >= 0 && age < 5 && lastData.quality?.analysis_available) {
-      render({ ...lastData, refresh_pending: false, quality: { ...lastData.quality,
-        actionable: false, analysis_available: true, status: 'source_unavailable' } });
-    } else {
-      $('#verdict').textContent = '暂停交易提示';
-      $('#verdictSay').textContent = '本次数据未能完成更新，暂不使用旧画面判断买卖。';
-      $('#actions').textContent = '数据未完成更新，观察线暂停。';
-    }
-  } finally {
-    $('#refreshButton').disabled = false;
-    $('#refreshButton').textContent = '刷新';
-  }
-}
-
-let pollTimer = null;
-let pollCount = 0;
-let lastData = null;
-$('#refreshButton').addEventListener('click', () => {
-  clearTimeout(pollTimer); pollCount = 0; load(true);
-});
-load(false);
-if (window.lucide) window.lucide.createIcons();
+$('#refreshButton').addEventListener('click',()=>{polls=0;load(true);});
+$('#autoButton').addEventListener('click',()=>{auto=!auto;$('#autoButton').textContent=auto?'自动 30秒':'自动已暂停';$('#autoButton').classList.toggle('active',auto);$('#autoButton').setAttribute('aria-pressed',String(auto));});
+$('#positionInput').addEventListener('input',()=>{try{localStorage.setItem('hs300.position',$('#positionInput').value);}catch{}renderPosition();});
+setInterval(()=>{if(auto&&!document.hidden)load(false);},30000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&auto)load(false);});
+initChartControls();load(false);if(window.lucide)window.lucide.createIcons();

@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { DEFAULT_CONFIG, HOLD, buildSignals, metrics, runBacktest, windowTargets } from "./lib/hs300-model.js";
-import { SETTLED_KEY, alignSeries, buildHs300Result, resultFromSettled } from "./lib/hs300-data.js";
+import { SETTLED_KEY, alignSeries, buildHs300Result, fetchIntraday, fetchTencentQuote, resultFromSettled } from "./lib/hs300-data.js";
 import { conditionalLevels, confirmationState, signalDetail } from "./lib/hs300-decision.js";
 import { DASH_KEY, getHs300Dashboard } from "./lib/hs300-dashboard.js";
+import { buildPriceChart, liveAnalysis, quoteQuality } from "./lib/hs300-live.js";
 
 const raw = JSON.parse(readFileSync(new URL("../raw_data.json", import.meta.url), "utf8"));
 const series = alignSeries(raw.price, raw.total_return, raw.bond10y);
 const settled = { series, settled_price: raw.price.find((r) => r.date === series.dates.at(-1)).close,
-  bond_last: raw.bond10y[series.dates.at(-1)], bond_date: series.dates.at(-1) };
+  bond_last: raw.bond10y[series.dates.at(-1)], bond_date: series.dates.at(-1), price_rows: raw.price.slice(-900) };
 const now = new Date("2026-10-15T06:00:00Z");
 const memoryEnv = (initial = []) => {
   const values = new Map(initial);
@@ -62,6 +63,99 @@ test("intraday quotes cannot change a settled decision or its backtest", () => {
   assert.equal(a.pe, b.pe);
   assert.equal(b.price_index.level, settled.settled_price);
   assert.equal(b.intraday.level, 9000);
+  assert.notEqual(a.analysis.pe, b.analysis.pe, "current analysis must respond to a changed quote");
+  assert.notDeepEqual(a.analysis.windows, b.analysis.windows);
+});
+
+test("live quote recomputes PE, ERP and windows without appending it to settled history", () => {
+  const copy = structuredClone(settled);
+  const quote = { date: "20261015", time: "14:00:00", level: settled.settled_price * .9 };
+  const a = liveAnalysis(settled, quote, now);
+  assert.equal(a.quality.can_decide, true);
+  assert.ok(Math.abs(a.pe - series.pe.at(-1)*.9) < 1e-6);
+  assert.equal(a.baseline.sample_count, series.pe.length);
+  const expected = windowTargets(series.pe, series.spread, series.pe.at(-1)*.9, 100/(series.pe.at(-1)*.9)-settled.bond_last);
+  assert.equal(a.consensus.exposure, expected.consensus_exposure);
+  assert.deepEqual(settled, copy);
+  assert.deepEqual(liveAnalysis(settled, quote, now), a, "repeated refresh cannot count extra samples");
+});
+
+test("same-day quote replaces the final daily observation when ranking", () => {
+  const a = liveAnalysis(settled, { date: series.dates.at(-1), time: "14:00:00", level: settled.settled_price }, new Date("2026-10-13T06:00:00Z"));
+  assert.equal(a.baseline.sample_count, series.pe.length-1);
+  assert.equal(a.windows.full.pe_percentile, signalDetail(series).windows.full.pePercentile);
+});
+
+test("current conditional lines satisfy PE and ERP consensus under the SAME live history", () => {
+  const a = liveAnalysis(settled, {date:"20261015",time:"14:00:00",level:4166.01}, now);
+  for(const kind of ["buy","sell"]){
+    const line=a.conditional_levels[kind];if(!line)continue;
+    const pe=a.pe*line.level/a.price;
+    const detail=windowTargets(series.pe,series.spread,pe,100/pe-a.bond.value);
+    assert.equal(detail.agreed,true);assert.equal(detail.consensus_exposure,line.target);
+  }
+});
+
+test("quote freshness and trading session are distinct from delayed daily publication", () => {
+  assert.equal(quoteQuality({date:"20261015",time:"14:00:00",level:4200},now).can_decide,true);
+  assert.equal(quoteQuality({date:"20261015",time:"13:30:00",level:4200},now).status,"delayed");
+  assert.equal(quoteQuality({date:"20261015",time:"16:00:00",level:4200},new Date("2026-10-15T08:01:00Z")).status,"after_close");
+  assert.equal(quoteQuality({date:"20261015",time:"14:05:00",level:4200},now).available,false);
+  const a=liveAnalysis(settled,{date:"20261015",time:"16:00:00",level:4000},new Date("2026-10-15T08:01:00Z"));
+  assert.equal(a.mode,"quote_estimate");assert.equal(a.price,4000);assert.equal(a.quality.available,true);
+  assert.equal(a.quality.can_decide,false);assert.notEqual(a.pe,series.pe.at(-1));
+});
+
+test("cached live estimates are rechecked for quote age on every read", async () => {
+  const current = new Date();
+  const cn = new Date(current.getTime()+8*3600000);
+  const day = cn.toISOString().slice(0,10).replaceAll('-','');
+  const stamp = new Date(current.getTime()-10*60000+8*3600000).toISOString().slice(11,19);
+  const data = resultFromSettled(settled,null,{now});
+  data.price_asof=day;data.bond.as_of=day;
+  data.analysis={...data.analysis,date:day,time:stamp,mode:'quote_estimate',
+    quality:{available:true,can_decide:true},quote_quality:{status:'trading',can_decide:true}};
+  const env=memoryEnv([[DASH_KEY,JSON.stringify({cached_at:current.toISOString(),data})]]);
+  const response=await getHs300Dashboard(env,false);
+  assert.equal(response.analysis.quality.can_decide,false);
+});
+
+test("available quote is analyzed even though the official daily close is not published", () => {
+  const a=liveAnalysis(settled,{date:'20261015',time:'14:00:00',level:4000},now);
+  assert.equal(a.date,'20261015');assert.equal(a.baseline.date,'20261013');
+  assert.equal(a.quality.available,true);assert.equal(a.quality.can_decide,true);
+  assert.ok(a.conditional_levels.buy||a.conditional_levels.sell);
+});
+
+test("future bond values cannot leak into a current quote estimate", () => {
+  const s={...settled,latest_bond:{as_of:'20261016',value:100}};
+  const a=liveAnalysis(s,{date:'20261015',time:'14:00:00',level:4000},now);
+  assert.equal(a.bond.value,settled.bond_last);
+  assert.ok(a.erp>0);
+});
+
+test("price chart uses real OHLC and never invents candles from return levels", () => {
+  const p=raw.price.slice(-400);const quote={date:"20261015",time:"14:00:00",level:4166,open:4145,high:4176,low:4115};
+  const chart=buildPriceChart(p,quote,now),bar=chart.bars.at(-1);
+  assert.equal(bar.close,4166);assert.equal(bar.open,4145);assert.equal(bar.high,4176);assert.equal(bar.provisional,true);
+  assert.equal(bar.candle_valid,true);assert.ok(chart.ma250.at(-1)>0);
+  const missing=buildPriceChart([{date:"20261014",close:4200}],null,now);
+  assert.equal(missing.bars[0].candle_valid,false);assert.equal(missing.bars[0].open,undefined);
+  const invalid=buildPriceChart(p,{...quote,high:null,low:null},now);
+  assert.equal(invalid.bars.at(-1).candle_valid,false);
+});
+
+test("primary quote derives high and low only from the real intraday feed", async (t) => {
+  t.mock.method(globalThis,"fetch",async()=>Response.json({data:{intraDayHeader:{tradeDate:'2026-10-15',tradeTime:'14:00:00',current:4200,openToday:4190,closePre:4210},intraDayPerfList:[{tradeTime:'09:30:00',current:4190,high:4195,low:4180},{tradeTime:'14:00:00',current:4200,high:4220,low:4170}]}}));
+  const q=await fetchIntraday('000300');
+  assert.equal(q.high,4220);assert.equal(q.low,4170);assert.equal(q.open,4190);assert.equal(q.points.length,2);
+});
+
+test("backup quote parser supplies dated price and actual OHLC", async (t) => {
+  const a=Array(40).fill('');a[3]='4166.01';a[4]='4217.68';a[5]='4145.95';a[30]='20261015140000';a[32]='-1.23';a[33]='4176.09';a[34]='4115.07';
+  t.mock.method(globalThis,'fetch',async()=>new Response(`v_sh000300="${a.join('~')}";`));
+  const q=await fetchTencentQuote();
+  assert.equal(q.date,'20261015');assert.equal(q.time,'14:00:00');assert.equal(q.level,4166.01);assert.equal(q.high,4176.09);assert.equal(q.source,'腾讯行情（备用）');
 });
 
 test("old quote never receives a live label; old daily data pauses decisions", () => {
@@ -114,7 +208,7 @@ test("settled warm path uses KV and only the quote endpoint", async (t) => {
   const calls = [];
   t.mock.method(globalThis, "fetch", async (url) => {
     calls.push(String(url));
-    return Response.json({ data: { intraDayHeader: { tradeDate: "2026-10-15", current: 4200 } } });
+    return Response.json({ data: { intraDayHeader: { tradeDate: "2026-10-15", tradeTime: "14:00:00", current: 4200 } } });
   });
   const d = await buildHs300Result(env, { now });
   assert.equal(d.history_source, "cache");
@@ -219,7 +313,7 @@ test("after-close refresh preserves history while official new daily bars are un
   assert.ok(saved.series.spread.every((v, i) => Math.abs(v - series.spread[i]) < 1e-12));
   const before = calls.length;
   const b = await buildHs300Result(env, { now: afternoon });
-  assert.equal(calls.length - before, 1, "ordinary repeated reads fetch at most the quote");
+  assert.ok(calls.length - before <= 2, "ordinary repeated reads fetch only quote sources");
   assert.deepEqual(a.windows, b.windows);
 });
 
@@ -251,7 +345,7 @@ test("long-lived validated history survives slow upstream and repeated failures 
   assert.ok(!a.source_warning.includes("aborted"));
   const before = calls.length;
   const b = await buildHs300Result(env, { now: afternoon });
-  assert.equal(calls.length - before, 1);
+  assert.ok(calls.length - before <= 2);
   assert.equal(b.quality.actionable, false, "cached failed check cannot turn actionable on next read");
 });
 

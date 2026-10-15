@@ -5,14 +5,15 @@
 import { buildHs300Result } from "./hs300-data.js";
 import { DEFAULT_CONFIG } from "./hs300-model.js";
 import { dashboardQuality } from "./hs300-decision.js";
+import { quoteQuality } from "./hs300-live.js";
 
 // Cache the full payload briefly. Daily history has its own longer-lived cache;
-// a manual refresh obtains a new observation-only quote.
-const CACHE_MS = 5 * 60 * 1000;
-export const DASH_KEY = "hs300:dashboard:v4";
+// a manual refresh obtains a new quote for the current analysis layer.
+const CACHE_MS = 25 * 1000;
+export const DASH_KEY = "hs300:dashboard:v5";
 const HIST_KEY = "hs300:history";
 const inFlight = new WeakMap();
-export const SERVICE_VERSION = "v2.4.1";
+export const SERVICE_VERSION = "v2.5";
 
 function readableError(error) {
   return error?.name === "AbortError" || /abort|timeout/i.test(error?.message || "")
@@ -22,7 +23,15 @@ function readableError(error) {
 function referencePayload(data, { now = new Date(), error = null, refreshing = false } = {}) {
   const warning = error || data.source_warning || data.refresh_error || null;
   const quality = dashboardQuality(data, now, warning);
-  return { ...data, service_version: SERVICE_VERSION, quality,
+  const analysis = data.analysis ? structuredClone(data.analysis) : null;
+  if (analysis) {
+    analysis.quote_quality = quoteQuality({ date: analysis.date, time: analysis.time, level: analysis.price }, now);
+    const historical = analysis.quality.available && quality.analysis_available;
+    analysis.quality = { ...analysis.quality, available: historical,
+      can_decide: historical && analysis.quote_quality.can_decide && !warning && analysis.mode === "quote_estimate",
+      reason: warning ? "本次核验未完成，保留上次报价分析" : analysis.quote_quality.reason };
+  }
+  return { ...data, analysis, service_version: SERVICE_VERSION, quality,
     refresh_status: refreshing ? "refreshing" : warning ? "reference" : "cached",
     refresh_error: warning, last_attempt_at: error ? now.toISOString() : data.last_attempt_at,
     refresh_pending: refreshing };
@@ -87,10 +96,10 @@ export async function refreshHs300(env, { recordHistory = true, builder = buildH
 }
 
 export async function getHs300Dashboard(env, force = false, options = {}) {
-  const cached = await kvGet(env, DASH_KEY);
+  const cached = await kvGet(env, DASH_KEY) || await kvGet(env, "hs300:dashboard:v4");
   const age = cached?.cached_at ? Date.now() - Date.parse(cached.cached_at) : Number.POSITIVE_INFINITY;
   const valid = cached?.data?.model_version === DEFAULT_CONFIG.version;
-  if (!force && valid && age >= 0 && age < CACHE_MS) {
+  if (!force && valid && cached.data.analysis && age >= 0 && age < CACHE_MS) {
     return { ...referencePayload(cached.data), cache_age_seconds: Math.floor(age / 1000) };
   }
   let pending = inFlight.get(env);
@@ -109,7 +118,7 @@ export async function getHs300Dashboard(env, force = false, options = {}) {
   }).finally(() => {
     if (inFlight.get(env) === pending) inFlight.delete(env);
   });
-  if (!force && valid && options.ctx) {
+  if (!force && valid && cached.data.analysis && options.ctx) {
     options.ctx.waitUntil(settled.catch(() => {}));
     return referencePayload(cached.data, { refreshing: true });
   }

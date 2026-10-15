@@ -207,14 +207,25 @@ def main() -> int:
     agree = all(isinstance(v, (int, float)) for v in vals) and len(set(vals)) == 1
     check("live consensus matches window targets", agree == api["consensus"]["agreed"])
     check("HOLD on disagreement", agree or api["target_exposure"] == "HOLD")
-    print("8. deployed conditional observations")
-    levels = api.get("conditional_levels") or {}
-    spot = api["price_index"]["level"]
+    print("8. deployed current-quote analysis and price chart")
+    a = api.get("analysis") or {}
+    check("quote analysis available", bool(a.get("windows")))
+    check("price chart populated", len(api.get("price_chart", {}).get("bars", [])) >= 260)
+    check("quote and base dates explicit", bool(a.get("date")) and a.get("baseline", {}).get("date") == api["price_asof"])
+    if a.get("mode") == "quote_estimate":
+        expected_pe = api["pe"] * a["price"] / api["price_index"]["level"]
+        check("PE scales with current quote", abs(a["pe"] - expected_pe) < 0.001)
+        check("ERP uses the dated bond", abs(a["erp"] - (100 / a["pe"] - a["bond"]["value"])) < 0.001)
+    vals_live = [w["exposure"] for w in a.get("windows", {}).values()]
+    check("current consensus fits all windows", bool(vals_live) and a["consensus"]["agreed"] == (len(set(vals_live)) == 1))
+    levels = a.get("conditional_levels") or {}
+    spot = a.get("price", 0)
     for kind in ("buy", "sell"):
         line = levels.get(kind)
         if line:
             check(kind + " requires all windows", line.get("all_windows_agree") is True)
             check(kind + " direction", line["level"] < spot if kind == "buy" else line["level"] > spot)
+    check("official settled backtest unchanged", api.get("backtest", {}).get("trades", 0) > 0)
     rows = api.get("ladder") or []
     check("PE reference table populated", len(rows) == len(cfg.ladder))
     check("latest history returned", bool(api.get("history")))

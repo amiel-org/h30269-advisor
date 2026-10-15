@@ -8,6 +8,7 @@
 // The bond series is forward-filled from PAST observations only.
 import { DEFAULT_CONFIG, buildSignals, metrics, percentileOfHistory, runBacktest } from "./hs300-model.js";
 import { conditionalLevels, confirmationState, dashboardQuality, signalDetail, valuationTable } from "./hs300-decision.js";
+import { buildPriceChart, liveAnalysis, quoteQuality } from "./hs300-live.js";
 
 const CSI_PERF = "https://www.csindex.com.cn/csindex-home/perf/index-perf";
 const EM_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get";
@@ -63,6 +64,7 @@ export async function fetchCsiSeries(code, startDate, endDate, timeoutMs = 18000
     rows.push({
       date: String(item.tradeDate), close,
       pe: num(item.peg),
+      open: num(item.open), high: num(item.high), low: num(item.low), volume: num(item.tradingVol),
     });
   }
   rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -80,8 +82,8 @@ function bondPageUrl(page) {
   return url.toString();
 }
 
-// Live intraday quote for the price index.  PRESENTATION ONLY -- the model
-// deliberately never uses an unsettled intraday price for a signal.
+// Latest price-index quote drives the explicitly estimated analysis layer.
+// It never overwrites official daily observations or the settled backtest.
 export async function fetchIntraday(code, signal) {
   const url = new URL("https://www.csindex.com.cn/csindex-home/perf/index-perf-oneday");
   url.searchParams.set("indexCode", code);
@@ -95,16 +97,54 @@ export async function fetchIntraday(code, signal) {
     const date = raw.length === 10 ? raw.replace(/-/g, "") : (raw.length === 8 ? raw : "");
     const level = num(h.current);
     if (!date || level === null || level <= 0) return null;
+    const points = (payload.data?.intraDayPerfList || []).map((r) => ({
+      time: String(r.tradeTime), value: num(r.current), high: num(r.high), low: num(r.low),
+    })).filter((r) => r.value > 0 && /^\d{2}:\d{2}:\d{2}$/.test(r.time));
+    const highs = points.map((r) => r.high).filter((v) => v > 0);
+    const lows = points.map((r) => r.low).filter((v) => v > 0);
     return {
       date,
       time: String(h.tradeTime || ""),
       level,
       change_pct: num(h.changePct),
       open: num(h.openToday),
+      previous_close: num(h.closePre),
+      high: highs.length ? Math.max(...highs, level) : null,
+      low: lows.length ? Math.min(...lows, level) : null,
+      volume: num(h.tradingVol), source: "中证指数", points,
     };
   } catch {
     return null;
   }
+}
+
+export async function fetchTencentQuote(signal) {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 4000);
+  const abort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    const response = await fetch("https://qt.gtimg.cn/q=sh000300", { headers: { "User-Agent": UA }, signal: controller.signal });
+    if (!response.ok) return null;
+    const match = (await response.text()).match(/v_sh000300="([^"]+)"/);
+    if (!match) return null;
+    const a = match[1].split("~"), stamp = a[30];
+    if (!/^\d{14}$/.test(stamp || "") || !(num(a[3]) > 0)) return null;
+    return { date: stamp.slice(0, 8), time: `${stamp.slice(8, 10)}:${stamp.slice(10, 12)}:${stamp.slice(12, 14)}`,
+      level: num(a[3]), previous_close: num(a[4]), open: num(a[5]), high: num(a[33]), low: num(a[34]),
+      change_pct: num(a[32]), volume: null, source: "腾讯行情（备用）", points: [] };
+  } catch { return null; }
+  finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
+}
+
+async function latestQuote(signal, now) {
+  const primary = await fetchIntraday("000300", signal);
+  const quality = quoteQuality(primary, now);
+  if (quality.available && !["previous_session", "delayed"].includes(quality.status)) return primary;
+  const backup = await fetchTencentQuote(signal);
+  if (!backup) return primary;
+  const stamp = (q) => q ? `${q.date} ${q.time || ""}` : "";
+  return stamp(backup) > stamp(primary) ? backup : primary;
 }
 
 export async function fetchBond10y(signal) {
@@ -203,18 +243,20 @@ export async function buildHs300Result(env = null, { now = new Date(), signal, f
   const cn = chinaNow(now), end = compact(cn);
   // Fetch the quote and daily history concurrently, with a shared cancellation
   // signal. Fixed history start keeps the expanding window stable over time.
-  const quotePromise = fetchIntraday("000300", signal);
+  const quotePromise = latestQuote(signal, now);
   let settled = await readSettled(env, now);
   let historySource = "cache";
   let historyError = null;
   const checkedAge = now.getTime() - Date.parse(settled?.checked_at || settled?.cached_at);
-  if (settled && (forceCheck || checkedAge >= HISTORY_CHECK_MS)) {
+  const hydrateChart = settled && !settled.price_rows?.length && !settled.chart_checked_at;
+  if (settled && (forceCheck || checkedAge >= HISTORY_CHECK_MS || hydrateChart)) {
     try {
       // Re-read a small overlap so delayed publications and recent revisions
       // can be reconciled without redownloading the entire research sample.
       const start = compact(new Date(dayStamp(settled.series.dates.at(-1)) - 14 * 86400000));
+      const priceStart = settled.price_rows?.length ? start : compact(new Date(now.getTime() - 1500 * 86400000));
       const [prices, totals, latestBond] = await Promise.all([
-        fetchCsiSeries("000300", start, end, 8000, signal),
+        fetchCsiSeries("000300", priceStart, end, 8000, signal),
         fetchCsiSeries("H00300", start, end, 8000, signal),
         fetchRecentBond(signal),
       ]);
@@ -225,7 +267,7 @@ export async function buildHs300Result(env = null, { now = new Date(), signal, f
         if (d >= start) bond[d] = 100 / settled.series.pe[i] - settled.series.spread[i];
       }
       for (const [d, value] of Object.entries(latestBond)) if (d <= end) bond[d] = value;
-      const priceRows = prices.filter(complete), trRows = totals.filter(complete);
+      const priceRows = prices.filter((r) => complete(r) && r.date >= start), trRows = totals.filter(complete);
       const recent = alignSeries(priceRows, trRows, bond);
       if (!recent.dates.length || recent.dates.at(-1) < settled.series.dates.at(-1)) {
         throw new Error("数据源尚未返回完整的最近日线，保留已确认历史");
@@ -245,14 +287,16 @@ export async function buildHs300Result(env = null, { now = new Date(), signal, f
       if (!bondDate) throw new Error("缺少最近日线对应的国债收益率");
       settled = { ...settled, series, settled_price: priceRows.find((r) => r.date === last)?.close,
         bond_last: latestBond[bondDate], bond_date: bondDate, checked_at: now.toISOString(),
-        cached_at: now.toISOString(), last_error: null };
+        cached_at: now.toISOString(), last_error: null, chart_checked_at: now.toISOString(),
+        latest_bond: (() => { const d = Object.keys(latestBond).sort().filter((d) => d <= end).at(-1); return d ? { as_of: d, value: latestBond[d] } : null; })(),
+        price_rows: [...new Map([...(settled.price_rows || []), ...prices.filter(complete)].map((r) => [r.date, r])).values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-900) };
       await writeSettled(env, settled);
       historySource = "incremental";
     } catch (error) {
       historyError = error.message;
       // Back off after a failure too. A slow source must not cause every
       // subsequent reader to repeat the same request storm.
-      settled = { ...settled, checked_at: now.toISOString(), last_error: historyError };
+      settled = { ...settled, checked_at: now.toISOString(), chart_checked_at: now.toISOString(), last_error: historyError };
       await writeSettled(env, settled);
       historySource = "cache-fallback";
     }
@@ -272,6 +316,9 @@ export async function buildHs300Result(env = null, { now = new Date(), signal, f
     const bondDate = Object.keys(bond).sort().filter((d) => d <= last).at(-1);
     settled = { series, settled_price: priceRows.find((r) => r.date === last)?.close,
       bond_last: bond[bondDate], bond_date: bondDate, cached_at: now.toISOString(), checked_at: now.toISOString(), last_error: null };
+    settled.price_rows = priceRows.slice(-900);
+    const newestBond = Object.keys(bond).sort().at(-1);
+    settled.latest_bond = { as_of: newestBond, value: bond[newestBond] };
     await writeSettled(env, settled);
     historySource = "live";
   }
@@ -306,7 +353,7 @@ export function resultFromSettled(settled, quote = null, { now = new Date(), his
   // A fixed INITIAL allocation drifts over time; it is a budget comparison,
   // not a volatility-matched benchmark (average exposure is known ex post).
   const matched = buyHold.map(([d, nav]) => [d, 1 - average + average * nav]);
-  return {
+  const result = {
     model_version: DEFAULT_CONFIG.version,
     as_of: series.dates[last], price_asof: series.dates[last],
     quote_status: live ? "盘中报价仅供观察" : "已收盘数据",
@@ -336,4 +383,12 @@ export function resultFromSettled(settled, quote = null, { now = new Date(), his
       "等初始预算比较中的比例来自事后平均仓位，不是波动率匹配，也不是可提前获得的最优比例。最大回撤不代表未来亏损上限。",
     ],
   };
+  result.analysis = liveAnalysis(settled, quote, now);
+  if (historyError) {
+    result.analysis.quality.can_decide = false;
+    result.analysis.quality.reason = "历史基准本次核验失败，当前点位测算保留供参考";
+  }
+  result.price_chart = buildPriceChart(settled.price_rows || [], quote, now);
+  result.disclosures[1] = "当前分析根据最新点位即时估算PE、ERP与三窗口目标；它是盘中辅助判断，未完成的当日日线不会计作收盘确认。历史回测仍使用收盘信号、次日收盘成交，不能作为盘中交易业绩。";
+  return result;
 }
