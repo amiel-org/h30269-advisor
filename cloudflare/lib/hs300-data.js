@@ -73,6 +73,33 @@ function bondPageUrl(page) {
   return url.toString();
 }
 
+// Live intraday quote for the price index.  PRESENTATION ONLY -- the model
+// deliberately never uses an unsettled intraday price for a signal.
+export async function fetchIntraday(code) {
+  const url = new URL("https://www.csindex.com.cn/csindex-home/perf/index-perf-oneday");
+  url.searchParams.set("indexCode", code);
+  try {
+    const payload = await fetchJson(url.toString(), {
+      referer: `https://www.csindex.com.cn/zh-CN/indices/index-detail/${code}`,
+      retries: 1,
+    });
+    const h = (payload.data || {}).intraDayHeader || {};
+    const raw = String(h.tradeDate || "");
+    const date = raw.length === 10 ? raw.replace(/-/g, "") : (raw.length === 8 ? raw : "");
+    const level = num(h.current);
+    if (!date || level === null) return null;
+    return {
+      date,
+      time: String(h.tradeTime || ""),
+      level,
+      change_pct: num(h.changePct),
+      open: num(h.openToday),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchBond10y() {
   // Newest-first, 500 rows/page, ~20 pages back to 2002.  A single page covers
   // only ~2 years and would silently drop every older price row, so we must
@@ -128,10 +155,11 @@ export async function buildHs300Result() {
   const startDate = new Date(today.getTime() - 5800 * 86400000);
   const start = compact(startDate);
 
-  const [priceRows, trRows, bond] = await Promise.all([
+  const [priceRows, trRows, bond, intradayRaw] = await Promise.all([
     fetchCsiSeries("000300", start, end),
     fetchCsiSeries("H00300", start, end),
     fetchBond10y(),
+    fetchIntraday("000300"),
   ]);
 
   const series = alignSeries(priceRows, trRows, bond);
@@ -163,36 +191,33 @@ export async function buildHs300Result() {
 
   const priceNow = priceRows.length ? priceRows[priceRows.length - 1].close : null;
 
-  // ---- band table computed SERVER-SIDE (front end must not recompute) ---- //
-  // One row per ladder band.  `boundary_pe` / `boundary_index` are the levels a
-  // window crosses at the band's LOWER edge, i.e. the point at which the target
-  // changes.  The bottom band has no lower edge, so those values are null.
-  const bands = [];
-  for (const [lo, hi] of [[70, 100], [60, 70], [50, 60], [40, 50], [30, 40], [0, 30]]) {
-    const target = ladderExposure(lo === 0 ? 0 : lo, LADDER_FOR_BANDS);
-    const row = {
-      label: lo === 0 ? "< 30%" : (hi >= 100 ? "≥ 70%" : `${lo}% ~ ${hi}%`),
-      lo, hi, target,
-      pe: {}, levels: {},
-    };
-    if (lo > 0) {
-      for (const spec of WINDOW_SPECS_FOR_BANDS) {
-        const pool = spec.mode === "rolling" && spec.days > 0 ? peHist.slice(-spec.days) : peHist;
-        const qv = quantile(pool, lo);
-        row.pe[spec.name] = qv === null ? null : +qv.toFixed(4);
-        row.levels[spec.name] = (qv === null || !priceNow) ? null : +(priceNow * qv / peNow).toFixed(1);
-      }
-    } else {
-      for (const spec of WINDOW_SPECS_FOR_BANDS) {
-        row.pe[spec.name] = null;
-        row.levels[spec.name] = null;
-      }
+  // Is the intraday quote NEWER than the last settled daily bar?  Only then is
+  // it worth showing; the model itself never uses an unsettled price.
+  const intraday = (intradayRaw && intradayRaw.date > series.dates[last]) ? intradayRaw : null;
+
+  // ---- boundary table computed SERVER-SIDE (front end must not recompute) ----
+  // The ladder changes target at PE percentiles 70/60/50/40/30.  For each
+  // boundary we publish the price level *at that boundary* for every window,
+  // plus the target just below and just above it.  That makes the trigger
+  // unambiguous: "drop to L(60) -> target becomes 0.375".
+  const boundaries = [];
+  for (const pctBoundary of [70, 60, 50, 40, 30]) {
+    const row = { pct: pctBoundary, levels: {}, pe: {}, target_below: null, target_above: null };
+    for (const spec of WINDOW_SPECS_FOR_BANDS) {
+      const pool = spec.mode === "rolling" && spec.days > 0 ? peHist.slice(-spec.days) : peHist;
+      const qv = quantile(pool, pctBoundary);
+      row.pe[spec.name] = qv === null ? null : +qv.toFixed(4);
+      row.levels[spec.name] = (qv === null || !priceNow) ? null : +(priceNow * qv / peNow).toFixed(1);
     }
-    bands.push(row);
+    row.target_below = ladderExposure(pctBoundary - 0.001, LADDER_FOR_BANDS);
+    row.target_above = ladderExposure(pctBoundary, LADDER_FOR_BANDS);
+    boundaries.push(row);
   }
 
   return {
     as_of: series.dates[last],
+    price_asof: series.dates[last],
+    intraday,
     price_index: { code: "000300", level: priceNow },
     total_return_index: { code: "H00300", level: series.tr[last] },
     pe: peNow,
@@ -202,7 +227,7 @@ export async function buildHs300Result() {
     windows,
     consensus: { agreed: detail.agreed, exposure: detail.consensus_exposure, vote: detail.vote },
     target_exposure: detail.consensus_exposure,
-    bands,
+    boundaries,
     backtest: {
       cagr_calendar_pct: m.cagrCalendarPct,
       max_drawdown_pct: m.maxDrawdownPct,

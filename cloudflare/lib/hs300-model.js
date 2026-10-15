@@ -23,6 +23,8 @@ export const DEFAULT_CONFIG = {
       { min_pct: 0, exposure: 1.0 },
     ],
     erp_gate: { lo: 30, hi: 70 },
+    tolerance_steps: 0,
+    tolerance_rule: "conservative",
   },
   indicators: {
     pe_percentile: { min_obs: 700 },
@@ -111,12 +113,23 @@ export function windowTargets(peHist, erpHist, peNow, erpNow, cfg = DEFAULT_CONF
       exposure: expo,
     };
   }
-  const agreed = values.length > 0 && new Set(values).size === 1;
+  // Tolerance rule: require agreement within `tolerance_steps` grid steps and
+  // take the conservative end of the cluster (three windows rarely coincide
+  // exactly outside extremes).
+  const grid = cfg.allocation.grid;
+  const tol = (cfg.allocation.tolerance_steps || 0) * grid;
+  const span = values.length ? Math.max(...values) - Math.min(...values) : null;
+  const within = values.length > 0 && span <= tol + 1e-9;
+  const chosen = within
+    ? (cfg.allocation.tolerance_rule === "conservative" ? Math.min(...values) : values[0])
+    : HOLD;
   return {
     windows: perWindow,
-    agreed,
+    agreed: within,
+    span,
+    tolerance: tol,
     vote: values.length ? Math.min(...values) : null,
-    consensus_exposure: agreed ? values[0] : HOLD,
+    consensus_exposure: chosen,
   };
 }
 

@@ -32,6 +32,9 @@ class Config:
         self.version = raw["version"]
         self.pe_min_obs = int(raw["indicators"]["pe_percentile"]["min_obs"])
         self.erp_min_obs = int(raw["indicators"]["erp_percentile"]["min_obs"])
+        alloc = raw["allocation"]
+        self.tolerance_steps = int(alloc.get("tolerance_steps") or 0)
+        self.tolerance_rule = alloc.get("tolerance_rule") or "conservative"
         self.windows = raw["indicators"].get("percentile_windows") or [
             {"name": "full", "label": "全历史", "mode": "expanding", "min_obs": 700}
         ]
@@ -133,12 +136,24 @@ def window_targets(pe_hist: Sequence[float], erp_hist: Sequence[float],
             "erp_percentile": round(ep, 4),
             "exposure": expo,
         }
-    agreed = bool(values) and len(set(values)) == 1
+    # Tolerance rule: the three windows are rarely exactly equal in normal
+    # markets (they only coincide at the extremes).  We therefore accept a
+    # spread of up to `tolerance_steps` grid steps while still requiring
+    # agreement, and take the CONSERVATIVE end of that cluster.
+    tol = cfg.tolerance_steps * cfg.grid
+    span = (max(values) - min(values)) if values else None
+    within = bool(values) and span <= tol + 1e-9
+    if within:
+        chosen = min(values) if cfg.tolerance_rule == "conservative" else values[0]
+    else:
+        chosen = HOLD
     return {
         "windows": per_window,
-        "agreed": agreed,
+        "agreed": within,
+        "span": span,
+        "tolerance": tol,
         "vote": min(values) if values else None,
-        "consensus_exposure": values[0] if agreed else HOLD,
+        "consensus_exposure": chosen,
     }
 
 
