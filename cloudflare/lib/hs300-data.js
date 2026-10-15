@@ -171,6 +171,8 @@ async function writeSettled(env, series) {
   } catch { /* best effort */ }
 }
 
+export const BUILD_TAG = "tag-886c2d3";
+
 export async function buildHs300Result(env = null) {
   const today = new Date();
   const end = compact(today);
@@ -326,6 +328,7 @@ export async function buildHs300Result(env = null) {
     price_asof: priceAsOf,
     quote_status: quoteStatus,
     history_source: historySource,
+    build_tag: BUILD_TAG,
     live,
     live_note: liveNote,
     intraday,
