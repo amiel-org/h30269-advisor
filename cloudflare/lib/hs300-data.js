@@ -159,19 +159,22 @@ async function readSettled(env) {
     if (!raw) return null;
     const obj = JSON.parse(raw);
     if (!obj.cached_at || Date.now() - Date.parse(obj.cached_at) > SETTLED_MAX_AGE_MS) return null;
-    return obj.series || null;
+    if (!obj.series) return null;
+    obj.series.__settled_price = obj.settled_price ?? null;
+    obj.series.__bond_last = obj.bond_last ?? null;
+    return obj.series;
   } catch { return null; }
 }
 
-async function writeSettled(env, series) {
+async function writeSettled(env, series, settledPrice, bondLast) {
   if (!env || !env.H30269_KV) return;
   try {
-    await env.H30269_KV.put(SETTLED_KEY,
-      JSON.stringify({ cached_at: new Date().toISOString(), series }));
+    await env.H30269_KV.put(SETTLED_KEY, JSON.stringify({
+      cached_at: new Date().toISOString(),
+      series, settled_price: settledPrice, bond_last: bondLast,
+    }));
   } catch { /* best effort */ }
 }
-
-export const BUILD_TAG = "tag-886c2d3";
 
 export async function buildHs300Result(env = null) {
   const today = new Date();
@@ -189,8 +192,16 @@ export async function buildHs300Result(env = null) {
 
   let series;
   let historySource;
+  // hoisted to function scope: the live-bar derivation below needs both, and on
+  // a cache HIT they would otherwise be block-scoped and undefined.
+  let priceRows = null;
+  let bond = null;
+  let settledBasePrice = null;
+  let settledBond = null;
   if (cached && cached.dates && cached.dates.length >= 750) {
     series = cached;
+    settledBasePrice = cached.__settled_price || null;
+    settledBond = cached.__bond_last || null;
     historySource = "cache";
   } else {
     // Hard cap: if csindex hangs, fail fast so the caller can serve the last
@@ -200,14 +211,19 @@ export async function buildHs300Result(env = null) {
       fetchCsiSeries("H00300", start, end),
       fetchBond10y(),
     ]);
-    const [priceRows, trRows, bond] = await Promise.race([
+    let trRows;
+    [priceRows, trRows, bond] = await Promise.race([
       fetchHistory,
       new Promise((_, rej) =>
         setTimeout(() => rej(new Error("history fetch exceeded 30s")), 30000)),
     ]);
     series = alignSeries(priceRows, trRows, bond);
     if (series.dates.length < 750) throw new Error(`insufficient history: ${series.dates.length}`);
-    await writeSettled(env, series);
+    const pxByDate = new Map(priceRows.map((r) => [r.date, r.close]));
+    settledBasePrice = pxByDate.get(series.dates[series.dates.length - 1]) || null;
+    const bk = Object.keys(bond).sort();
+    settledBond = bond[bk[bk.length - 1]] ?? null;
+    await writeSettled(env, series, settledBasePrice, settledBond);
     historySource = "live";
   }
 
@@ -229,12 +245,21 @@ export async function buildHs300Result(env = null) {
   try {
     const nextDate = intradayRaw ? intradayRaw.date : null;
     if (nextDate && nextDate > series.dates[settledLast]) {
-      const closeByDate = new Map(priceRows.map((r) => [r.date, r.close]));
-      const basePx = closeByDate.get(series.dates[settledLast]);
+      // On a cache hit priceRows is absent, so use the persisted settled price.
+      let basePx = null;
+      if (priceRows) {
+        const closeByDate = new Map(priceRows.map((r) => [r.date, r.close]));
+        basePx = closeByDate.get(series.dates[settledLast]);
+      }
+      if (basePx === null) basePx = settledBasePrice;
       if (basePx) {
         const ratio = intradayRaw.level / basePx;
-        const bondKeys = Object.keys(bond).sort();
-        const yLive = bond[bondKeys[bondKeys.length - 1]];
+        // on a cache hit `bond` is null; the persisted last yield is used
+        let yLive = settledBond;
+        if (bond) {
+          const bondKeys = Object.keys(bond).sort();
+          yLive = bond[bondKeys[bondKeys.length - 1]];
+        }
         const trLive = series.tr[settledLast] * ratio;
         const peLive = series.pe[settledLast] * ratio;
         liveSeries = {
@@ -275,7 +300,8 @@ export async function buildHs300Result(env = null) {
   const erpPct = percentileOfHistory(erpHist, erpNow);
 
   const priceNow = intraday ? intraday.level
-    : (priceRows.length ? priceRows[priceRows.length - 1].close : null);
+    : (settledBasePrice != null ? settledBasePrice
+      : (priceRows && priceRows.length ? priceRows[priceRows.length - 1].close : null));
 
   // ---- boundary table computed SERVER-SIDE (front end must not recompute) ----
   const pools = {};
@@ -328,7 +354,6 @@ export async function buildHs300Result(env = null) {
     price_asof: priceAsOf,
     quote_status: quoteStatus,
     history_source: historySource,
-    build_tag: BUILD_TAG,
     live,
     live_note: liveNote,
     intraday,
