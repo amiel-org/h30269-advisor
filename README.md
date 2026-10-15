@@ -123,6 +123,17 @@ python .\advisor.py --dividend-yield 5.2 --bond-yield 1.75
 4. 短期趋势只控制分批速度，不单独改变买卖方向。
 5. 数据源结构变化时程序会报错或降级，不会伪造结果。
 
+## 访问地址（国内）
+
+| 入口 | 地址 | 国内直连 |
+|---|---|---|
+| 推荐（Pages 反代） | https://hs300-desk.pages.dev | 是 |
+| 原始（Workers） | https://h30269-hs300.anyongliang027.workers.dev | 否，需代理 |
+
+`*.workers.dev` 在大陆被 DNS 污染，`*.pages.dev` 可直连。因此用 `pages-proxy/`
+做反向代理转发到原 Worker，业务逻辑、KV 数据和定时任务全部仍在原 Worker。
+详见 `pages-proxy/README.md`。
+
 ## 两个决策台
 
 | 页面 | 路径 | 标的 | 模型 |
