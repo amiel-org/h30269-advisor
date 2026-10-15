@@ -27,6 +27,12 @@ export const DEFAULT_CONFIG = {
   indicators: {
     pe_percentile: { min_obs: 700 },
     erp_percentile: { min_obs: 700 },
+    // Consensus windows: each computes its own exposure; all must agree.
+    percentile_windows: [
+      { name: "full", label: "全历史", mode: "expanding", min_obs: 700 },
+      { name: "10y", label: "近10年", mode: "rolling", days: 2440, min_obs: 700 },
+      { name: "5y", label: "近5年", mode: "rolling", days: 1220, min_obs: 700 },
+    ],
   },
   execution: {
     deadband: 0.05,
@@ -71,6 +77,49 @@ export function percentileOfHistory(history, current) {
   return (100 * below) / history.length;
 }
 
+// Sentinel: windows disagree -> keep the current position untouched.
+export const HOLD = "HOLD";
+
+export function windowSlice(history, spec) {
+  if (spec.mode === "rolling" && spec.days > 0) return history.slice(-spec.days);
+  return history;
+}
+
+export function windowPercentile(history, current, spec) {
+  const pool = windowSlice(history, spec);
+  const need = spec.min_obs || 1;
+  if (pool.length < need) return null;
+  return percentileOfHistory(pool, current);
+}
+
+export function windowTargets(peHist, erpHist, peNow, erpNow, cfg = DEFAULT_CONFIG) {
+  const perWindow = {};
+  const values = [];
+  for (const spec of cfg.indicators.percentile_windows) {
+    const pp = windowPercentile(peHist, peNow, spec);
+    const ep = windowPercentile(erpHist, erpNow, spec);
+    if (pp === null || ep === null) {
+      perWindow[spec.name] = { label: spec.label || spec.name, pePercentile: null, erpPercentile: null, exposure: null };
+      continue;
+    }
+    const expo = targetExposure(pp, ep, cfg);
+    values.push(expo);
+    perWindow[spec.name] = {
+      label: spec.label || spec.name,
+      pePercentile: +pp.toFixed(4),
+      erpPercentile: +ep.toFixed(4),
+      exposure: expo,
+    };
+  }
+  const agreed = values.length > 0 && new Set(values).size === 1;
+  return {
+    windows: perWindow,
+    agreed,
+    vote: values.length ? Math.min(...values) : null,
+    consensus_exposure: agreed ? values[0] : HOLD,
+  };
+}
+
 // --------------------------------------------------------------------------- //
 // signal series
 // --------------------------------------------------------------------------- //
@@ -84,9 +133,27 @@ export function buildSignals(series, cfg = DEFAULT_CONFIG) {
     if (peHist.length < minPe || erpHist.length < minErp) {
       out.push(null);
     } else {
-      const pePct = percentileOfHistory(peHist, series.pe[i]);
-      const erpPct = percentileOfHistory(erpHist, series.spread[i]);
-      out.push(targetExposure(pePct, erpPct, cfg));
+      const info = windowTargets(peHist, erpHist, series.pe[i], series.spread[i], cfg);
+      out.push(info.consensus_exposure);
+    }
+    peHist.push(series.pe[i]);
+    erpHist.push(series.spread[i]);
+  }
+  return out;
+}
+
+// Same walk as buildSignals but keeps each window's numbers for the UI.
+export function buildSignalDetail(series, cfg = DEFAULT_CONFIG) {
+  const minPe = cfg.indicators.pe_percentile.min_obs;
+  const minErp = cfg.indicators.erp_percentile.min_obs;
+  const out = [];
+  const peHist = [];
+  const erpHist = [];
+  for (let i = 0; i < series.dates.length; i += 1) {
+    if (peHist.length < minPe || erpHist.length < minErp) {
+      out.push(null);
+    } else {
+      out.push(windowTargets(peHist, erpHist, series.pe[i], series.spread[i], cfg));
     }
     peHist.push(series.pe[i]);
     erpHist.push(series.spread[i]);
@@ -146,7 +213,10 @@ export function runBacktest(series, cfg = DEFAULT_CONFIG, signals = null, lag = 
 
     // (2) confirmation on the target known at close of day i
     const src = i - lag;
-    const desired = src >= first ? sig[src] : null;
+    let desired = src >= first ? sig[src] : null;
+    // HOLD = windows disagree -> take no action at all; the position stays put
+    // and no confirmation streak is carried over.
+    if (desired === HOLD) desired = null;
     if (desired === null || desired === undefined) {
       prevTarget = null; streak = 0;
     } else if (desired === prevTarget) {

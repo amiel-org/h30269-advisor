@@ -6,7 +6,8 @@
 //   * eastmoney       RPTA_WEB_TREASURYYIELD -> 10Y China government yield
 //
 // The bond series is forward-filled from PAST observations only.
-import { buildSignals, runBacktest, metrics, targetExposure, percentileOfHistory } from "./hs300-model.js";
+import { buildSignalDetail, buildSignals, ladderExposure, metrics,
+         percentileOfHistory, runBacktest } from "./hs300-model.js";
 
 const CSI_PERF = "https://www.csindex.com.cn/csindex-home/perf/index-perf";
 const EM_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get";
@@ -141,22 +142,67 @@ export async function buildHs300Result() {
   const m = metrics(run.curve);
 
   const last = series.dates.length - 1;
-  const pePct = percentileOfHistory(series.pe.slice(0, last), series.pe[last]);
-  const erpPct = percentileOfHistory(series.spread.slice(0, last), series.spread[last]);
-  const target = targetExposure(pePct, erpPct);
+  const peHist = series.pe.slice(0, last);
+  const erpHist = series.spread.slice(0, last);
+  const peNow = series.pe[last];
+  const erpNow = series.spread[last];
 
-  // last price-index close for display (user watches 000300)
+  // ---- per-window view + consensus (the model's actual decision) ---- //
+  const detail = buildSignalDetail(series).at(-1);
+  const windows = {};
+  for (const [key, w] of Object.entries(detail.windows)) {
+    windows[key] = {
+      label: w.label,
+      pe_percentile: w.pePercentile,
+      erp_percentile: w.erpPercentile,
+      exposure: w.exposure,
+    };
+  }
+  const pePct = percentileOfHistory(peHist, peNow);
+  const erpPct = percentileOfHistory(erpHist, erpNow);
+
   const priceNow = priceRows.length ? priceRows[priceRows.length - 1].close : null;
+
+  // ---- band table computed SERVER-SIDE (front end must not recompute) ---- //
+  // One row per ladder band.  `boundary_pe` / `boundary_index` are the levels a
+  // window crosses at the band's LOWER edge, i.e. the point at which the target
+  // changes.  The bottom band has no lower edge, so those values are null.
+  const bands = [];
+  for (const [lo, hi] of [[70, 100], [60, 70], [50, 60], [40, 50], [30, 40], [0, 30]]) {
+    const target = ladderExposure(lo === 0 ? 0 : lo, LADDER_FOR_BANDS);
+    const row = {
+      label: lo === 0 ? "< 30%" : (hi >= 100 ? "≥ 70%" : `${lo}% ~ ${hi}%`),
+      lo, hi, target,
+      pe: {}, levels: {},
+    };
+    if (lo > 0) {
+      for (const spec of WINDOW_SPECS_FOR_BANDS) {
+        const pool = spec.mode === "rolling" && spec.days > 0 ? peHist.slice(-spec.days) : peHist;
+        const qv = quantile(pool, lo);
+        row.pe[spec.name] = qv === null ? null : +qv.toFixed(4);
+        row.levels[spec.name] = (qv === null || !priceNow) ? null : +(priceNow * qv / peNow).toFixed(1);
+      }
+    } else {
+      for (const spec of WINDOW_SPECS_FOR_BANDS) {
+        row.pe[spec.name] = null;
+        row.levels[spec.name] = null;
+      }
+    }
+    bands.push(row);
+  }
 
   return {
     as_of: series.dates[last],
     price_index: { code: "000300", level: priceNow },
     total_return_index: { code: "H00300", level: series.tr[last] },
-    pe: series.pe[last],
+    pe: peNow,
     pe_percentile: +pePct.toFixed(2),
-    erp: +(series.spread[last]).toFixed(4),
+    erp: +erpNow.toFixed(4),
     erp_percentile: +erpPct.toFixed(2),
-    target_exposure: target,
+    windows,
+    consensus: { agreed: detail.agreed, exposure: detail.consensus_exposure, vote: detail.vote },
+    target_exposure: detail.consensus_exposure,
+    bands,
     backtest: {
       cagr_calendar_pct: m.cagrCalendarPct,
       max_drawdown_pct: m.maxDrawdownPct,
@@ -173,8 +219,32 @@ export async function buildHs300Result() {
     },
     disclosures: [
       "策略预算口径：仓位是划给沪深300策略资金池的比例，不是家庭总资产比例。",
+      "多窗口一致口径：全历史 / 近10年 / 近5年 三窗口结论一致才给信号，分歧时保持仓位不动。",
       "样本内研究：参数在历史区间内确定，非干净样本外，无实盘业绩。",
       "最大回撤自净值高点计算，不代表本金亏损上限。",
     ],
   };
+}
+
+// ---- band-table helpers (server-side only) ---- //
+const LADDER_FOR_BANDS = [
+  { min_pct: 70, exposure: 0.0 },
+  { min_pct: 60, exposure: 0.125 },
+  { min_pct: 50, exposure: 0.375 },
+  { min_pct: 40, exposure: 0.625 },
+  { min_pct: 30, exposure: 0.875 },
+  { min_pct: 0, exposure: 1.0 },
+];
+
+const WINDOW_SPECS_FOR_BANDS = [
+  { name: "full", mode: "expanding" },
+  { name: "10y", mode: "rolling", days: 2440 },
+  { name: "5y", mode: "rolling", days: 1220 },
+];
+
+function quantile(pool, pct) {
+  if (!pool || !pool.length) return null;
+  const s = [...pool].sort((a, b) => a - b);
+  const idx = Math.min(s.length - 1, Math.max(0, Math.floor((pct / 100) * s.length)));
+  return s[idx];
 }

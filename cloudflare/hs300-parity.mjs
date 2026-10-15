@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildSignals, metrics, runBacktest, targetExposure } from "./lib/hs300-model.js";
+import { buildSignals, metrics, runBacktest } from "./lib/hs300-model.js";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (p) => JSON.parse(readFileSync(join(root, p), "utf8"));
@@ -42,18 +42,30 @@ function align(bundle) {
 const series = align(snapshot);
 
 // ---- 1. signals must match the Python-produced series ---- //
-const signals = buildSignals(series).map((s) => (s === null ? null : +s.toFixed(12)));
+const rawSignals = buildSignals(series);
+const signals = rawSignals.map((s) => (typeof s === "number" ? +s.toFixed(12) : s));
 assert.equal(signals.length, expected.signals.length, "signal length");
 let mismatches = 0;
 for (let i = 0; i < signals.length; i += 1) {
   const a = signals[i], b = expected.signals[i];
   if (a === null && b === null) continue;
+  if (b === "HOLD" || a === "HOLD") {
+    if (a !== b) {
+      if (mismatches < 5) console.error(`HOLD mismatch at ${i} (${series.dates[i]}): js=${a} py=${b}`);
+      mismatches += 1;
+    }
+    continue;
+  }
   if (a === null || b === null || Math.abs(a - b) > 1e-9) {
     if (mismatches < 5) console.error(`signal mismatch at ${i} (${series.dates[i]}): js=${a} py=${b}`);
     mismatches += 1;
   }
 }
 assert.equal(mismatches, 0, `${mismatches} signal mismatches`);
+
+// HOLD-day count must also agree
+const jsHold = rawSignals.filter((s) => s === "HOLD").length;
+assert.equal(jsHold, expected.hold_days, `HOLD days js=${jsHold} py=${expected.hold_days}`);
 
 // ---- 2. backtest metrics must match ---- //
 const run = runBacktest(series, undefined, null, 1);
@@ -74,10 +86,9 @@ assert.equal(run.steps.length, expected.trades, `trade count js=${run.steps.leng
 
 // ---- 3. current signal must match ---- //
 const last = series.dates.length - 1;
-const pePct = expected.current.pePercentile;
-const erpPct = expected.current.erpPercentile;
-assert.ok(Math.abs(targetExposure(pePct, erpPct) - expected.current.targetExposure) < 1e-12,
-  "current target exposure");
+assert.equal(rawSignals[last], expected.current.consensus,
+  `current consensus js=${rawSignals[last]} py=${expected.current.consensus}`);
 
 console.log(`parity OK  | signals=${signals.length}  trades=${run.steps.length}  ` +
-            `CAGR=${m.cagrCalendarPct}%  MaxDD=${m.maxDrawdownPct}%  Sharpe=${m.sharpe}`);
+            `HOLD=${jsHold}  CAGR=${m.cagrCalendarPct}%  MaxDD=${m.maxDrawdownPct}%  ` +
+            `Sharpe=${m.sharpe}  consensus=${rawSignals[last]}`);

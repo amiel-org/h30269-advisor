@@ -32,6 +32,9 @@ class Config:
         self.version = raw["version"]
         self.pe_min_obs = int(raw["indicators"]["pe_percentile"]["min_obs"])
         self.erp_min_obs = int(raw["indicators"]["erp_percentile"]["min_obs"])
+        self.windows = raw["indicators"].get("percentile_windows") or [
+            {"name": "full", "label": "全历史", "mode": "expanding", "min_obs": 700}
+        ]
         self.ladder = [(float(x["min_pct"]), float(x["exposure"]))
                        for x in raw["allocation"]["pe_ladder"]]
         gate = raw["allocation"]["erp_gate"]
@@ -86,6 +89,57 @@ def percentile_of_history(history: Sequence[float], current: float) -> float:
     if not history:
         raise ValueError("empty history")
     return 100.0 * sum(x <= current for x in history) / len(history)
+
+
+# Sentinel meaning "windows disagree -> keep the current position".
+HOLD = "HOLD"
+
+
+def window_slice(history: Sequence[float], spec: dict) -> Sequence[float]:
+    """Return the sub-history a window spec refers to (still excluding today)."""
+    if spec.get("mode") == "rolling":
+        days = int(spec.get("days") or 0)
+        return history[-days:] if days > 0 else history
+    return history
+
+
+def window_percentile(history: Sequence[float], current: float, spec: dict) -> float | None:
+    pool = window_slice(history, spec)
+    need = int(spec.get("min_obs") or 1)
+    if len(pool) < need:
+        return None
+    return percentile_of_history(pool, current)
+
+
+def window_targets(pe_hist: Sequence[float], erp_hist: Sequence[float],
+                   pe_now: float, erp_now: float, cfg: "Config") -> dict:
+    """Per-window exposure plus a consensus flag.  History excludes today."""
+    per_window: dict = {}
+    values: list[float] = []
+    for spec in cfg.windows:
+        pp = window_percentile(pe_hist, pe_now, spec)
+        ep = window_percentile(erp_hist, erp_now, spec)
+        if pp is None or ep is None:
+            per_window[spec["name"]] = {
+                "label": spec.get("label", spec["name"]),
+                "pe_percentile": None, "erp_percentile": None, "exposure": None,
+            }
+            continue
+        expo = target_exposure(pp, ep, cfg)
+        values.append(expo)
+        per_window[spec["name"]] = {
+            "label": spec.get("label", spec["name"]),
+            "pe_percentile": round(pp, 4),
+            "erp_percentile": round(ep, 4),
+            "exposure": expo,
+        }
+    agreed = bool(values) and len(set(values)) == 1
+    return {
+        "windows": per_window,
+        "agreed": agreed,
+        "vote": min(values) if values else None,
+        "consensus_exposure": values[0] if agreed else HOLD,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -143,15 +197,29 @@ class Series:
 
 
 def build_signals(series: Series, cfg: "Config") -> list:
+    """Consensus signal series: an exposure when all windows agree, else HOLD."""
     out = []
     pe_hist, erp_hist = [], []
     for i in range(len(series)):
         if len(pe_hist) < cfg.pe_min_obs or len(erp_hist) < cfg.erp_min_obs:
             out.append(None)
         else:
-            pe_pct = percentile_of_history(pe_hist, series.pe[i])
-            erp_pct = percentile_of_history(erp_hist, series.spread[i])
-            out.append(target_exposure(pe_pct, erp_pct, cfg))
+            info = window_targets(pe_hist, erp_hist, series.pe[i], series.spread[i], cfg)
+            out.append(info["consensus_exposure"])
+        pe_hist.append(series.pe[i])
+        erp_hist.append(series.spread[i])
+    return out
+
+
+def build_signal_detail(series: Series, cfg: "Config") -> list:
+    """Same as build_signals but keeps each window's numbers for the UI."""
+    out = []
+    pe_hist, erp_hist = [], []
+    for i in range(len(series)):
+        if len(pe_hist) < cfg.pe_min_obs or len(erp_hist) < cfg.erp_min_obs:
+            out.append(None)
+        else:
+            out.append(window_targets(pe_hist, erp_hist, series.pe[i], series.spread[i], cfg))
         pe_hist.append(series.pe[i])
         erp_hist.append(series.spread[i])
     return out
@@ -210,6 +278,11 @@ def run_backtest(series: Series, cfg: "Config", signals=None, lag: int = 1) -> R
         # ---- (2) confirmation counting on the target known at close of day i ---- #
         src = i - lag
         desired = sig[src] if src >= first else None
+        if desired == HOLD:
+            # Windows disagree -> take no action at all.  The position is left
+            # exactly where it is; no confirmation streak is carried over, so a
+            # later agreement must confirm from scratch.
+            desired = None
         if desired is None:
             prev_target, streak = None, 0
         elif desired == prev_target:

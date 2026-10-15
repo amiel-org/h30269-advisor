@@ -26,6 +26,16 @@
   .hs-ladder th, .hs-ladder td { border-bottom:1px solid #eef2f7; padding:8px 10px; text-align:right; }
   .hs-ladder th:first-child, .hs-ladder td:first-child { text-align:left; }
   .hs-ladder tr.cur { background:#fff7ed; font-weight:700; }
+  .hs-win { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin:16px 0; }
+  .hs-win .w { border:1px solid #e5e7eb; border-radius:12px; padding:12px 14px; background:#fff; }
+  .hs-win .w .n { font-size:13px; color:#374151; font-weight:600; }
+  .hs-win .w .p { font-size:20px; font-weight:700; margin-top:4px; }
+  .hs-win .w .e { font-size:12px; color:#6b7280; margin-top:2px; }
+  .hs-win .w.ag { border-color:#34d399; background:#f0fdf4; }
+  .hs-win .w.dis { border-color:#fbbf24; background:#fffbeb; }
+  .hs-verdict { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; margin-left:8px; }
+  .hs-verdict.ok { background:#d1fae5; color:#065f46; }
+  .hs-verdict.no { background:#fef3c7; color:#92400e; }
   .hs-note { font-size:12px; color:#6b7280; border-left:3px solid #f59e0b; padding:8px 12px; background:#fffbeb; border-radius:6px; margin-top:14px; }
   .hs-err { display:none; background:#fef2f2; color:#991b1b; border:1px solid #fecaca; border-radius:8px; padding:10px 14px; margin:12px 0; font-size:14px; }
   .hs-btn { border:1px solid #e5e7eb; background:#fff; border-radius:8px; padding:6px 12px; cursor:pointer; font-size:14px; }
@@ -67,11 +77,18 @@
     <div class="hs-card"><div class="k">股债利差 ERP</div><div class="v" id="erp">--</div><div class="s" id="erpPct">--</div></div>
   </section>
 
+  <section class="hs-win" id="windows"></section>
+
   <section class="hs-card">
-    <div class="k">买卖分档表（模型自动生成）</div>
+    <div class="k">买卖分档表（后端计算，三窗口各自的触发点位）</div>
     <table class="hs-ladder" id="ladder">
-      <thead><tr><th>PE分位区间</th><th>目标仓位</th><th>PE</th><th>000300</th></tr></thead>
-      <tbody><tr><td colspan="4">加载中…</td></tr></tbody>
+      <thead><tr>
+        <th>PE分位区间</th><th>目标仓位</th>
+        <th>全历史 PE</th><th>全历史 000300</th>
+        <th>近10年 PE</th><th>近10年 000300</th>
+        <th>近5年 PE</th><th>近5年 000300</th>
+      </tr></thead>
+      <tbody><tr><td colspan="8">加载中…</td></tr></tbody>
     </table>
   </section>
 
