@@ -149,7 +149,7 @@ export function alignSeries(priceRows, trRows, bond) {
 
 export function compact(d) { return d.toISOString().slice(0, 10).replace(/-/g, ""); }
 
-const SETTLED_KEY = "hs300:settled:v1";
+const SETTLED_KEY = "hs300:settled:v2";
 const SETTLED_MAX_AGE_MS = 20 * 60 * 60 * 1000;   // refetch once per day
 
 async function readSettled(env) {
@@ -246,12 +246,16 @@ export async function buildHs300Result(env = null) {
     const nextDate = intradayRaw ? intradayRaw.date : null;
     if (nextDate && nextDate > series.dates[settledLast]) {
       // On a cache hit priceRows is absent, so use the persisted settled price.
+      // Resolve the settled price-index level.  On a warm cache priceRows is
+      // absent, so fall back to the persisted value; if even that is missing,
+      // scale H00300 back by its own price/TR ratio is impossible, so skip the
+      // live bar rather than inventing a number.
       let basePx = null;
       if (priceRows) {
         const closeByDate = new Map(priceRows.map((r) => [r.date, r.close]));
         basePx = closeByDate.get(series.dates[settledLast]);
       }
-      if (basePx === null) basePx = settledBasePrice;
+      if (basePx === null || basePx === undefined) basePx = settledBasePrice;
       if (basePx) {
         const ratio = intradayRaw.level / basePx;
         // on a cache hit `bond` is null; the persisted last yield is used
