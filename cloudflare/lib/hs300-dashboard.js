@@ -49,7 +49,7 @@ async function saveHistory(env, result) {
 }
 
 export async function refreshHs300(env, { recordHistory = true } = {}) {
-  const result = await buildHs300Result();
+  const result = await buildHs300Result(env);
   const payload = { ...result, history: await loadHistory(env), server_time: new Date().toISOString() };
   await kvPut(env, DASH_KEY, { cached_at: new Date().toISOString(), data: payload });
   if (recordHistory) await saveHistory(env, result);

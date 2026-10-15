@@ -40,13 +40,15 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function fetchCsiSeries(code, startDate, endDate) {
+export async function fetchCsiSeries(code, startDate, endDate, timeoutMs = 20000) {
   const url = new URL(CSI_PERF);
   url.searchParams.set("indexCode", code);
   url.searchParams.set("startDate", startDate);
   url.searchParams.set("endDate", endDate);
   const payload = await fetchJson(url.toString(), {
     referer: `https://www.csindex.com.cn/zh-CN/indices/index-detail/${code}`,
+    timeoutMs,
+    retries: 2,
   });
   if (String(payload.code) !== "200") throw new Error(`csindex ${code}: ${payload.msg}`);
   const rows = [];
@@ -147,7 +149,29 @@ export function alignSeries(priceRows, trRows, bond) {
 
 export function compact(d) { return d.toISOString().slice(0, 10).replace(/-/g, ""); }
 
-export async function buildHs300Result() {
+const SETTLED_KEY = "hs300:settled:v1";
+const SETTLED_MAX_AGE_MS = 20 * 60 * 60 * 1000;   // refetch once per day
+
+async function readSettled(env) {
+  if (!env || !env.H30269_KV) return null;
+  try {
+    const raw = await env.H30269_KV.get(SETTLED_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj.cached_at || Date.now() - Date.parse(obj.cached_at) > SETTLED_MAX_AGE_MS) return null;
+    return obj.series || null;
+  } catch { return null; }
+}
+
+async function writeSettled(env, series) {
+  if (!env || !env.H30269_KV) return;
+  try {
+    await env.H30269_KV.put(SETTLED_KEY,
+      JSON.stringify({ cached_at: new Date().toISOString(), series }));
+  } catch { /* best effort */ }
+}
+
+export async function buildHs300Result(env = null) {
   const today = new Date();
   const end = compact(today);
   // PE history on csindex starts 2011-06; fetch a bit earlier so the expanding
@@ -155,15 +179,35 @@ export async function buildHs300Result() {
   const startDate = new Date(today.getTime() - 5800 * 86400000);
   const start = compact(startDate);
 
-  const [priceRows, trRows, bond, intradayRaw] = await Promise.all([
-    fetchCsiSeries("000300", start, end),
-    fetchCsiSeries("H00300", start, end),
-    fetchBond10y(),
+  // ---- settled history: cached, because csindex can take ~50s for 1.4MB ----
+  const [cached, intradayRaw] = await Promise.all([
+    readSettled(env),
     fetchIntraday("000300"),
   ]);
 
-  const series = alignSeries(priceRows, trRows, bond);
-  if (series.dates.length < 750) throw new Error(`insufficient history: ${series.dates.length}`);
+  let series;
+  let historySource;
+  if (cached && cached.dates && cached.dates.length >= 750) {
+    series = cached;
+    historySource = "cache";
+  } else {
+    // Hard cap: if csindex hangs, fail fast so the caller can serve the last
+    // good cached dashboard instead of making the user wait ~50s.
+    const fetchHistory = Promise.all([
+      fetchCsiSeries("000300", start, end),
+      fetchCsiSeries("H00300", start, end),
+      fetchBond10y(),
+    ]);
+    const [priceRows, trRows, bond] = await Promise.race([
+      fetchHistory,
+      new Promise((_, rej) =>
+        setTimeout(() => rej(new Error("history fetch exceeded 30s")), 30000)),
+    ]);
+    series = alignSeries(priceRows, trRows, bond);
+    if (series.dates.length < 750) throw new Error(`insufficient history: ${series.dates.length}`);
+    await writeSettled(env, series);
+    historySource = "live";
+  }
 
   const signals = buildSignals(series);
   const run = runBacktest(series, undefined, signals, 1);
@@ -281,6 +325,7 @@ export async function buildHs300Result() {
     as_of: liveSeries.dates[liveLast],
     price_asof: priceAsOf,
     quote_status: quoteStatus,
+    history_source: historySource,
     live,
     live_note: liveNote,
     intraday,
