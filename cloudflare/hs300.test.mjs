@@ -6,6 +6,7 @@ import { SETTLED_KEY, alignSeries, buildHs300Result, fetchIntraday, fetchTencent
 import { conditionalLevels, confirmationState, signalDetail } from "./lib/hs300-decision.js";
 import { DASH_KEY, getHs300Dashboard } from "./lib/hs300-dashboard.js";
 import { buildPriceChart, liveAnalysis, quoteQuality } from "./lib/hs300-live.js";
+import { calculatePosition } from "../static/hs300-position.js";
 
 const raw = JSON.parse(readFileSync(new URL("../raw_data.json", import.meta.url), "utf8"));
 const series = alignSeries(raw.price, raw.total_return, raw.bond10y);
@@ -17,6 +18,55 @@ const memoryEnv = (initial = []) => {
   return { H30269_KV: { async get(k) { return values.get(k) ?? null; },
     async put(k, v) { values.set(k, v); } }, values };
 };
+
+const positionFixture = () => ({ execution: { step_size: .125, deadband: .05 }, analysis: {
+  quality: { available: true, can_decide: true }, consensus: { agreed: false, exposure: "HOLD" },
+  windows: { full: { exposure: .375 }, "10y": { exposure: .875 }, "5y": { exposure: .375 } },
+} });
+
+test("disagreement still calculates entered holdings and every scenario in cash", () => {
+  const data = positionFixture(), copy = structuredClone(data);
+  const r = calculatePosition(data, '50', '100000');
+  assert.equal(r.valid, true); assert.equal(r.agreed, false); assert.equal(r.canAct, false);
+  assert.equal(r.holdings, 50000); assert.equal(r.cash, 50000);
+  assert.equal(r.overall.move, 0); assert.equal(r.overall.after, .5);
+  assert.deepEqual(r.rows.map((w) => w.moveAmount), [-12500, 12500, -12500]);
+  assert.deepEqual(r.rows.map((w) => w.after), [.375, .625, .375]);
+  assert.deepEqual(r.rows.map((w) => w.targetAmount), [37500, 87500, 37500]);
+  assert.deepEqual(data, copy);
+});
+
+test("closed market leaves arithmetic usable but flags an agreed plan as a simulation", () => {
+  const data = positionFixture();data.analysis.quality.can_decide = false;
+  data.analysis.consensus = { agreed: true, exposure: .625 };
+  for (const w of Object.values(data.analysis.windows)) w.exposure = .625;
+  const r = calculatePosition(data,'25','100000');
+  assert.equal(r.valid,true);assert.equal(r.canAct,false);
+  assert.equal(r.overall.move,.125);assert.equal(r.overall.moveAmount,12500);
+  assert.equal(r.overall.after,.375);
+});
+
+test("zero and full positions are valid; missing or invalid inputs never get silently coerced", () => {
+  const d=positionFixture();
+  assert.equal(calculatePosition(d,'0','').holdings,null);
+  assert.equal(calculatePosition(d,'0','100000').holdings,0);
+  assert.equal(calculatePosition(d,'100','100000').cash,0);
+  for (const p of ['', ' ', '-1','101','NaN']) assert.equal(calculatePosition(d,p,'').valid,false,p);
+  for (const b of ['0','-1','Infinity','abc']) assert.equal(calculatePosition(d,'50',b).valid,false,b);
+});
+
+test("position scenarios respect the deadband and clamp the single step", () => {
+  const d=positionFixture();
+  const same=calculatePosition(d,'37.5','');assert.equal(same.rows[0].move,0);
+  const edge=calculatePosition(d,'42.5','');assert.equal(edge.rows[0].move,0);
+  const empty=calculatePosition(d,'0','100000');assert.ok(empty.rows.every((r)=>r.move<=.125));
+  const full=calculatePosition(d,'100','100000');assert.ok(full.rows.every((r)=>r.move>=-.125));
+});
+
+test("missing window data cannot produce an agreed portfolio plan", () => {
+  const d=positionFixture();d.analysis.consensus={agreed:true,exposure:.375};delete d.analysis.windows['10y'];
+  const r=calculatePosition(d,'50','100000');assert.equal(r.agreed,false);assert.equal(r.canAct,false);assert.equal(r.rows[1].target,undefined);
+});
 
 test("all configured windows must be populated before consensus", () => {
   const cfg = structuredClone(DEFAULT_CONFIG);

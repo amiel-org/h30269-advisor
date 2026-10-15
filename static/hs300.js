@@ -1,4 +1,5 @@
 import { initChartControls, renderMarketChart } from '/static/hs300-chart.js';
+import { calculatePosition } from '/static/hs300-position.js';
 const $=(s)=>document.querySelector(s);
 const num=(v,d=2)=>Number.isFinite(v)?v.toLocaleString('zh-CN',{minimumFractionDigits:d,maximumFractionDigits:d}):'--';
 const pct=(v,d=1)=>Number.isFinite(v)?`${num(v,d)}%`:'--';
@@ -6,21 +7,60 @@ const ymd=(d)=>d?.length===8?`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`:d
 const ORDER=['full','10y','5y'];
 const LABEL={full:'全部历史', '10y':'近10年', '5y':'近5年'};
 let lastData=null,busy=false,pollTimer=null,polls=0,auto=true,localOffline=false;
-try { const v=localStorage.getItem('hs300.position'); if(v!==null)$('#positionInput').value=v; } catch {}
+try { for(const [id,key]of[['positionInput','hs300.position'],['budgetInput','hs300.budget']]){const value=localStorage.getItem(key);if(value!==null)$('#'+id).value=value;} } catch {}
 const showError=(text)=>{$('#errorBanner').hidden=false;$('#errorBanner').textContent=text;};
 function quoteLabel(a){return {trading:'盘中即时测算',after_close:'收盘报价测算',lunch_break:'午间报价测算',before_open:'开盘前参考',delayed:'延迟报价测算',previous_session:'上一交易日报价',missing:'正式收盘参考',invalid:'行情时间异常'}[a.quote_quality?.status]||'当前点位测算';}
+const money=(value)=>Number.isFinite(value)?`${num(value,2)} 元`:'未填资金池';
+const pp=(value)=>`${num(Math.abs(value)*100,1)} 个百分点`;
 function renderPosition(){
- if(!lastData)return;
- const a=lastData.analysis,c=a?.consensus||{},input=$('#positionInput');
- const raw=input.value,w=Number(raw)/100;
- if(raw===''||!Number.isFinite(w)||w<0||w>1){$('#positionAdvice').textContent='填入0–100%的实际仓位，计算与你的资金池对应的调整幅度。';return;}
- if(!a.quality?.can_decide||localOffline){$('#positionAdvice').textContent=`${quoteLabel(a)}：可以看当前目标，但本次不生成可执行交易比例。开盘且报价及时后自动重算。`;return;}
- if(!c.agreed||!Number.isFinite(c.exposure)){$('#positionAdvice').textContent='当前三窗口目标仍分歧：按这套规则暂不调仓。你的现仓已记录，目标一致后即时比较。';return;}
- const gap=c.exposure-w,step=lastData.execution?.step_size||.125,deadband=lastData.execution?.deadband||.05;
- if(Math.abs(gap)<=deadband+1e-9){$('#positionAdvice').textContent=`现仓 ${pct(w*100)}，目标 ${pct(c.exposure*100)}，差在5个百分点以内，暂不调整。`;return;}
- const move=Math.min(Math.abs(gap),step),after=w+(gap>0?move:-move);
- $('#positionAdvice').textContent=`盘中试算：可考虑${gap>0?'增加':'减少'} ${num(move*100,1)} 个百分点，仓位 ${pct(w*100)} → ${pct(after*100)}。本日实际执行最多一档；本页不记录成交，不要按多次刷新重复执行。`;
+ const result=calculatePosition(lastData,$('#positionInput').value,$('#budgetInput').value);
+ const box=$('#calculatorResults');
+ if(!result.valid){box.hidden=true;$('#positionAdvice').textContent=result.reason;$('#calculatorMessage').textContent=result.reason;return;}
+ box.hidden=false;
+ const a=lastData.analysis,c=result.overall,capital=result.capital;
+ const currentText=`现仓 ${pct(result.current*100)}`;
+ const stage=localOffline?'当前连接中断':quoteLabel(a);
+ $('#calculatorMessage').textContent=`已计算：${currentText}；${capital===null?'未填写资金池金额，先展示比例。':`资金池 ${money(capital)}。`} ${stage}，下列情景仍可查看。`;
+ $('#positionSummary').replaceChildren(...[
+  ['你已持有',`${pct(result.current*100)}${capital===null?'':` / ${money(result.holdings)}`}`],
+  ['剩余现金',`${pct((1-result.current)*100)}${capital===null?'':` / ${money(result.cash)}`}`],
+  ['整体规则本次调整',`${result.agreed?c.move>0?'增加 '+pp(c.move):c.move<0?'减少 '+pp(c.move):'0 个百分点':'0 个百分点'}${!result.canAct||localOffline?' · 仅试算':''}`],
+ ].map(([label,value])=>{const div=document.createElement('div');const span=document.createElement('span');span.textContent=label;const strong=document.createElement('strong');strong.textContent=value;div.append(span,strong);return div;}));
+ let conclusion;
+ if(!result.analysisAvailable){conclusion=`${currentText}。行情基准未通过有效性检查，下面只保留已有数字的条件试算，不生成交易动作。`;}
+ else if(!result.agreed){conclusion=`${currentText} → 保持 ${pct(result.current*100)}，本次调整 0 个百分点${capital===null?'':`（0.00 元）`}。原因是三个窗口没有统一目标，并不是没有完成计算。`;
+ }else if(c.move===0){conclusion=`${currentText}，统一目标 ${pct(c.target*100)}；相差 ${pp(c.gap)}，在 ${pp(result.deadband)}死区以内，本次不调整${capital===null?'':`（0.00 元）`}。`;
+ }else{conclusion=`${currentText}，统一目标 ${pct(c.target*100)}，总差额为${c.gap>0?'还差':'多出'} ${pp(c.gap)}。假设下一次只走一档：${c.move>0?'增加':'减少'} ${pp(c.move)}${capital===null?'':`（${money(Math.abs(c.moveAmount))}）`}，仓位变为 ${pct(c.after*100)}。`;
+ }
+ if(!result.canAct||localOffline)conclusion+=` ${result.agreed?'这是试算结果，':'下方分窗口只是比较。'}${localOffline?'连接未恢复':!result.analysisAvailable?'数据待恢复':!a.quality.can_decide?stage:'三窗口分歧'}，当前不把情景转换成交易动作。`;
+ $('#positionAdvice').textContent=conclusion;$('#overallPlan').textContent=conclusion;
+ $('#scenarioRows').replaceChildren(...result.rows.map((row)=>{
+  const tr=document.createElement('tr');tr.dataset.window=row.key;
+  const moveText=!Number.isFinite(row.target)?'历史不足':row.move===0?`保持 ${pct(result.current*100)}（差在死区内）`:`${row.move>0?'增加':'减少'} ${pp(row.move)} → ${pct(row.after*100)}`;
+  const cells=[LABEL[row.key],Number.isFinite(row.target)?pct(row.target*100):'--',Number.isFinite(row.gap)?Math.abs(row.gap)<1e-9?'正好相同':`${row.gap>0?'还差':'多出'} ${pp(row.gap)}`:'--',moveText,capital===null?'填写金额后显示':!Number.isFinite(row.moveAmount)?'--':row.move===0?'0.00 元':`${row.move>0?'买入约':'卖出约'} ${money(Math.abs(row.moveAmount))}`];
+  cells.forEach(text=>{const td=document.createElement('td');td.textContent=text;tr.append(td);});return tr;
+ }));
+ $('#scenarioNote').textContent=`参考仓位是最终方向，每次试算最多 ${pp(result.step)}，仓位差不超过 ${pp(result.deadband)}则不调整。金额按资金池市值粗算，未扣费用、未按ETF交易单位取整；不能把三个情景一起执行。`;
 }
+function renderWindows(a){
+ $('#windows').replaceChildren(...ORDER.map(key=>{
+  const w=a.windows[key]||{},div=document.createElement('div');div.className=`hs-window ${a.consensus?.agreed?'agreed':''}`;
+  const add=(className,text)=>{const node=document.createElement('div');node.className=className;node.textContent=text;div.append(node);return node;};
+  add('name',key==='full'?'全部可用历史':key==='10y'?'按最近约10年比较':'按最近约5年比较');
+  add('sample',w.history_start?`${ymd(w.history_start)} — ${ymd(w.history_end)} · ${w.sample_count}条日线`:key==='full'?'全部可用历史日线':key==='10y'?'最近2440条日线；不足时用已有样本':'最近1220条日线；不足时用已有样本');
+  add('metric-label','PE历史位置');add('value',pct(w.pe_percentile));
+  add('rank-explain',Number.isFinite(w.pe_percentile)?`当前PE比约 ${num(w.pe_percentile,1)}% 的历史记录高`:'PE历史不足');
+  const erp=add('erp-explain','');
+  const strong=document.createElement('strong');strong.textContent=`股债利差历史位置 ${pct(w.erp_percentile)}`;erp.append(strong);
+  const plain=document.createElement('span');plain.textContent=Number.isFinite(w.erp_percentile)?`当前利差高于约 ${num(w.erp_percentile,1)}% 的历史记录；越高，盈利收益率相对国债越有吸引力。`:'股债利差历史不足';erp.append(plain);
+  add('expo',`单窗口参考仓位 ${pct(Number.isFinite(w.exposure)?w.exposure*100:null)}`);
+  add('budget-example',Number.isFinite(w.exposure)?`若资金池10万元，参考持仓 ${num(w.exposure*100000,0)} 元`:'无法计算参考持仓');
+  const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='这个仓位怎么算';details.append(summary);
+  const p=document.createElement('p');p.textContent=Number.isFinite(w.pe_cap)&&Number.isFinite(w.erp_cap)?`PE阶梯允许 ${pct(w.pe_cap*100)}，ERP闸门允许 ${pct(w.erp_cap*100)}；取较小值，再向下落到12.5个百分点的档位，得到 ${pct(w.exposure*100)}。`:'先按PE历史位置确定仓位上限，再经过股债利差闸门，并向下取整至12.5个百分点档位。';details.append(p);div.append(details);
+  return div;
+ }));
+}
+
 function render(data){
  if(!data.analysis)throw new Error('盘中分析尚在升级，请稍后刷新');
  const a=data.analysis,c=a.consensus||{},available=a.quality?.available,stale=!a.quality?.can_decide;
@@ -30,10 +70,10 @@ function render(data){
  $('#analysisMode').textContent=quoteLabel(a);
  $('#quoteBadge').textContent=localOffline?'连接中断':a.quote_quality?.status==='trading'?'行情及时':a.quote_quality?.status==='delayed'?'行情延迟':'最近报价';
  $('#hero').className=`action-rail ${agreed&&c.exposure>=.625?'tone-buy':agreed&&c.exposure<=.125?'tone-sell':'tone-hold'}`;
- const targets=ORDER.map(k=>`${LABEL[k]} ${pct(a.windows?.[k]?.exposure*100)}`).join(' / ');
- $('#verdictSay').textContent=agreed?`当前点位 ${num(a.price)}，三窗口目标一致。填入你的现仓，可立即比较增减方向。${stale?' 当前为参考测算。':''}`:`当前点位下三个目标分歧：${targets}。按现有规则保持仓位，继续盯下方观察线。`;
- $('#targetExposure').textContent=agreed?pct(c.exposure*100):'窗口分歧';
- $('#targetDetail').textContent=agreed?'目标占沪深300策略资金池的比例':'各窗口目标见下方，不能取平均冒充统一结论';
+ const targets=ORDER.map(k=>`${LABEL[k]}参考仓位 ${pct(Number.isFinite(a.windows?.[k]?.exposure)?a.windows[k].exposure*100:null)}`).join(' / ');
+ $('#verdictSay').textContent=agreed?`当前点位 ${num(a.price)}，三窗口目标一致。填入你的现仓，可立即比较增减方向。${stale?' 当前为参考测算。':''}`:`三段历史算出的参考仓位不同：${targets}。当前没有统一目标；填写仓位后，可看保持不动的整体结果和各窗口情景。`;
+ $('#targetExposure').textContent=agreed?pct(c.exposure*100):'不触发调仓';
+ $('#targetDetail').textContent=agreed?'目标占沪深300策略资金池的比例':'三个窗口没有共同目标；现仓保持不动，下面仍可试算';
  $('#topPrice').textContent=num(a.price);$('#topPe').textContent=`${num(a.pe)} / ${pct(a.pe_percentile)}`;$('#topErp').textContent=pct(a.erp,2);
  $('#topQuoteTime').textContent=`${ymd(a.date)} ${a.time||'日线'}`;
  $('#closeValue').textContent=num(a.price);$('#closeValue').className=a.change_pct>=0?'up':'down';$('#closeDate').textContent=`${ymd(a.date)} ${a.time||''} · ${a.source}`;
@@ -45,7 +85,7 @@ function render(data){
  $('#px').textContent=num(a.price);$('#pe').textContent=num(a.pe);$('#pep').textContent=pct(a.pe_percentile);$('#erp').textContent=pct(a.erp,2);
  $('#basePx').textContent=num(data.price_index?.level);$('#basePe').textContent=num(data.pe);$('#basePep').textContent=pct(data.pe_percentile);$('#baseErp').textContent=pct(data.erp,2);
  $('#valuationNote').textContent=a.assumptions;
- $('#windows').replaceChildren(...ORDER.map(k=>{const w=a.windows[k],div=document.createElement('div');div.className=`hs-window ${c.agreed?'agreed':''}`;div.innerHTML=`<div class="name">${LABEL[k]}</div><div class="value">${pct(w?.pe_percentile)}</div><div class="detail">PE 分位<br>ERP 分位 ${pct(w?.erp_percentile)}</div><div class="expo">目标 ${pct(w?.exposure*100)}</div>`;return div;}));
+ renderWindows(a);
  const actions=$('#actions');actions.replaceChildren();
  for(const [kind,label]of[['buy','加仓观察'],['sell','减仓观察']]){
   const line=a.conditional_levels?.[kind],li=document.createElement('li');
@@ -72,7 +112,8 @@ async function load(force=false){
 }
 $('#refreshButton').addEventListener('click',()=>{polls=0;load(true);});
 $('#autoButton').addEventListener('click',()=>{auto=!auto;$('#autoButton').textContent=auto?'自动 30秒':'自动已暂停';$('#autoButton').classList.toggle('active',auto);$('#autoButton').setAttribute('aria-pressed',String(auto));});
-$('#positionInput').addEventListener('input',()=>{try{localStorage.setItem('hs300.position',$('#positionInput').value);}catch{}renderPosition();});
+for(const [id,key]of[['positionInput','hs300.position'],['budgetInput','hs300.budget']])$('#'+id).addEventListener('input',()=>{try{localStorage.setItem(key,$('#'+id).value);}catch{}renderPosition();});
+$('#calculateButton').addEventListener('click',()=>{renderPosition();$('#positionCalculator').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});});
 setInterval(()=>{if(auto&&!document.hidden)load(false);},30000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&auto)load(false);});
 initChartControls();load(false);if(window.lucide)window.lucide.createIcons();

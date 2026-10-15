@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, percentileOfHistory, windowTargets } from "./hs300-model.js";
+import { DEFAULT_CONFIG, erpGate, ladderExposure, percentileOfHistory, windowTargets } from "./hs300-model.js";
 import { conditionalLevels, dataQuality } from "./hs300-decision.js";
 
 const isoDay = (d) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
@@ -42,9 +42,15 @@ export function liveAnalysis(settled, quote, now = new Date()) {
   const bond = usable && candidate?.as_of <= date && candidate.value > 0 ? candidate : { value: settled.bond_last, as_of: settled.bond_date };
   const erp = 100 / pe - bond.value;
   const detail = windowTargets(peHist, erpHist, pe, erp);
-  const windows = Object.fromEntries(Object.entries(detail.windows).map(([k, w]) => [k, {
+  const windows = Object.fromEntries(Object.entries(detail.windows).map(([k, w]) => {
+    const spec = DEFAULT_CONFIG.indicators.percentile_windows.find((s) => s.name === k);
+    const count = spec.mode === 'rolling' ? Math.min(spec.days, length) : length;
+    return [k, {
     label: w.label, pe_percentile: w.pePercentile, erp_percentile: w.erpPercentile, exposure: w.exposure,
-  }]));
+    sample_count: count, history_start: series.dates[length - count], history_end: series.dates[length - 1],
+    pe_cap: w.pePercentile === null ? null : ladderExposure(w.pePercentile, DEFAULT_CONFIG.allocation.pe_ladder),
+    erp_cap: w.erpPercentile === null ? null : erpGate(w.erpPercentile, DEFAULT_CONFIG.allocation.erp_gate.lo, DEFAULT_CONFIG.allocation.erp_gate.hi),
+  }]; }));
   const canDecide = usable && q.can_decide;
   const lines = history.actionable ? conditionalLevels(series, price, bond.value, DEFAULT_CONFIG, {
     peNow: pe, peHist, erpHist, detail,

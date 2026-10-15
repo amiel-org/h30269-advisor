@@ -8,7 +8,7 @@
 <body class="hs-desk">
 <div class="app-shell">
 <header class="topbar">
-  <div class="brand"><span class="brand-mark"><i data-lucide="chart-candlestick"></i></span><div class="brand-copy"><strong>H30269 &amp; HS300</strong><span>沪深300 · 盘中决策台 v2.5</span></div></div>
+  <div class="brand"><span class="brand-mark"><i data-lucide="chart-candlestick"></i></span><div class="brand-copy"><strong>H30269 &amp; HS300</strong><span>沪深300 · 盘中决策台 v2.5.1</span></div></div>
   <nav class="hs-tabs" aria-label="决策台切换"><a href="/">红利低波</a><a href="/hs300" class="active">沪深300</a></nav>
   <div class="top-actions"><span id="asOfText" role="status">读取中</span><button id="autoButton" class="hs-btn active" aria-pressed="true">自动 30秒</button><button id="refreshButton" class="hs-btn">刷新</button></div>
 </header>
@@ -33,16 +33,29 @@
  <aside id="hero" class="action-rail tone-hold">
   <div class="rail-head"><div><span>当前辅助判断</span><strong id="analysisMode">--</strong></div><span id="quoteBadge" class="confidence-badge">等待行情</span></div>
   <div class="rail-decision"><span class="rail-index">01</span><h2 id="verdict">正在分析</h2><p id="verdictSay">正在对齐当前点位、估值与历史窗口</p></div>
-  <div class="hs-target"><span>三窗口目标仓位</span><strong id="targetExposure">--</strong><small id="targetDetail">策略资金池口径</small></div>
+  <div class="hs-target"><span>整体调仓结论</span><strong id="targetExposure">--</strong><small id="targetDetail">三种历史窗口共同判断</small></div>
   <div class="hs-position"><label for="positionInput">你的当前仓位 <small>占策略资金池</small></label><div><input id="positionInput" type="number" min="0" max="100" step="0.1" placeholder="例如 37.5" inputmode="decimal"><span>%</span></div></div>
-  <div class="position-action"><i data-lucide="route"></i><div><span>本次可考虑的调整</span><p id="positionAdvice">填入实际仓位后计算</p></div></div>
+  <div class="hs-position"><label for="budgetInput">策略资金池金额 <small>持仓市值＋可用现金，可不填</small></label><div><input id="budgetInput" type="number" min="0.01" step="any" placeholder="例如100000" inputmode="decimal"><span>元</span></div></div>
+  <button id="calculateButton" class="hs-calculate">测算我的仓位 <span aria-hidden="true">↓</span></button>
+  <div class="position-action"><i data-lucide="route"></i><div><span>你的仓位测算结果</span><p id="positionAdvice" role="status" aria-live="polite">填入仓位即会计算；也可点击按钮查看完整结果</p></div></div>
   <div class="hs-baseline"><span>上次正式收盘对照</span><strong id="settledSummary">--</strong><small id="confirmationText">--</small></div>
   <div class="hs-rail-note">盘中方案即时随报价变化，本日实际执行最多一档。此处不记录成交，不能按刷新次数重复下单。原收盘策略的历史业绩不能代表盘中交易结果。</div>
  </aside>
 </section>
+<section id="positionCalculator" class="hs-calculator" aria-labelledby="calculatorTitle">
+ <div class="hs-section-head"><span class="section-label">填入仓位即可计算 · 金额可选 · 休市也能试算</span><h2 id="calculatorTitle">你的仓位，应该怎么理解</h2></div>
+ <p id="calculatorMessage" class="hs-calc-message" role="status" aria-live="polite">先在右侧填写当前仓位，再看整体结果及各窗口情景。</p>
+ <div id="calculatorResults" hidden>
+  <div id="positionSummary" class="hs-position-summary"></div>
+  <h3>整体结果</h3><p id="overallPlan" class="hs-overall-plan"></p>
+  <div class="hs-scenario-head"><h3>假如只按其中一个窗口，会怎样</h3><span>以下为单独情景，不是三个方案都要执行</span></div>
+  <div class="hs-table-scroll"><table id="scenarioTable" class="hs-table"><thead><tr><th>单独看哪个历史窗口</th><th>参考仓位</th><th>与你现仓总差额</th><th>假设下一次只走一档</th><th>对应金额</th></tr></thead><tbody id="scenarioRows"></tbody></table></div>
+  <p id="scenarioNote" class="hs-muted"></p>
+ </div>
+</section>
 <section class="hs-support">
  <div class="hs-section hs-lines"><div class="hs-section-head"><span class="section-label">当前点位下的条件边界</span><h2>下一步盯哪里</h2></div><ul id="actions" class="hs-actions"><li>正在计算观察线</li></ul></div>
- <div class="hs-section hs-windows"><div class="hs-section-head"><span class="section-label">同一时刻 · 三种历史窗口</span><h2>估值判断是否一致</h2></div><div id="windows" class="hs-window-grid"></div><p class="hs-muted">窗口目标一致才给统一目标；分歧表示这套规则暂不调仓，不代表市场没有机会。</p></div>
+ <div class="hs-section hs-windows"><div class="hs-section-head"><span class="section-label">同一个沪深300 · 换三段历史作比较</span><h2>为什么三种参考仓位不同</h2></div><p class="hs-window-intro">“近10年”是比较约10年的历史，不是让你持有10年。PE位置越低，历史上越便宜；股债利差位置越高，盈利收益率相对国债越有吸引力。</p><div id="windows" class="hs-window-grid"></div><p class="hs-muted">下方“单窗口参考仓位”是各自的计算结果，不是收益率或胜率。只有三者一致，整体策略才给出调仓目标。</p><details class="hs-glossary"><summary>ERP 到底是什么？位置86.6%代表什么？</summary><p>这里的ERP是模型使用的股债利差代理：100 ÷ PE − 中国10年期国债收益率。它比较指数盈利收益率与国债利息，不是股息率，也不是预计能赚到的收益。</p><p>“历史位置86.6%”表示当前利差高于约86.6%的比较样本，不是86.6%的年化收益或胜率。同一当前数值，用不同历史长度比较，位置会不同。</p></details></div>
 </section>
 <section class="hs-detail">
  <div class="hs-section"><div class="hs-section-head"><span class="section-label">估值与股债比较</span><h2>当前测算 / 正式收盘</h2></div><table class="hs-table"><thead><tr><th>指标</th><th>当前测算</th><th>正式收盘</th></tr></thead><tbody><tr><td>沪深300点位</td><td id="px">--</td><td id="basePx">--</td></tr><tr><td>PE</td><td id="pe">--</td><td id="basePe">--</td></tr><tr><td>PE历史分位</td><td id="pep">--</td><td id="basePep">--</td></tr><tr><td>ERP</td><td id="erp">--</td><td id="baseErp">--</td></tr></tbody></table><p id="valuationNote" class="hs-muted">--</p></div>

@@ -41,6 +41,52 @@ def main():
   assert healthy['data'].get('analysis')
   healthy['data']['refresh_pending']=False
   endpoint='**/api/hs300/refresh'
+  # Reproduce the user's exact confusion: disagreement and a closed market
+  # must still show useful arithmetic, without inventing a unified target.
+  compare=copy.deepcopy(healthy)
+  a=compare['data']['analysis']
+  a['quality']={'available':True,'can_decide':False,'reason':'已收盘'}
+  a['quote_quality']={'available':True,'can_decide':False,'status':'after_close'}
+  a['consensus']={'agreed':False,'exposure':'HOLD','span':.5}
+  for key,target,pe,erp in [('full',.375,50.5,81.8),('10y',.875,39.6,86.6),('5y',.375,58.4,73.3)]:
+   a['windows'][key].update(exposure=target,pe_percentile=pe,erp_percentile=erp)
+  page.route(endpoint,lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps(compare)))
+  button.click();ready()
+  page.locator('#positionInput').fill('50')
+  page.locator('#budgetInput').fill('100000')
+  page.get_by_role('button',name='测算我的仓位').click()
+  assert '现仓 50.0%' in page.locator('#positionAdvice').inner_text()
+  assert '保持 50.0%' in page.locator('#overallPlan').inner_text()
+  assert '0 个百分点' in page.locator('#overallPlan').inner_text()
+  ten=page.locator('#scenarioRows tr[data-window="10y"]').inner_text()
+  assert '87.5%' in ten and '37.5' in ten and '12.5' in ten and '12,500.00' in ten
+  assert '增加' in ten
+  full=page.locator('#scenarioRows tr[data-window="full"]').inner_text()
+  assert '减少' in full and '37.5%' in full and '12,500.00' in full
+  assert '50,000.00' in page.locator('#positionSummary').inner_text()
+  page.locator('#budgetInput').fill('200000')
+  assert '100,000.00' in page.locator('#positionSummary').inner_text()
+  assert '25,000.00' in page.locator('#scenarioRows tr[data-window="10y"]').inner_text()
+  page.locator('#budgetInput').fill('')
+  assert '填写金额后显示' in page.locator('#scenarioRows').inner_text()
+  assert page.locator('#scenarioRows tr').count()==3
+  page.locator('#budgetInput').fill('100000')
+  assert '不是让你持有10年' in page.locator('.hs-window-intro').inner_text()
+  assert '股债利差历史位置 86.6%' in page.locator('#windows').inner_text()
+  assert '单窗口参考仓位 87.5%' in page.locator('#windows').inner_text()
+  page.locator('#windows details').nth(1).locator('summary').click()
+  assert 'ERP闸门' in page.locator('#windows details').nth(1).inner_text()
+  page.locator('#positionInput').fill('0')
+  assert '现仓 0.0%' in page.locator('#overallPlan').inner_text()
+  page.locator('#positionInput').fill('101')
+  assert page.locator('#calculatorResults').is_hidden()
+  page.locator('#positionInput').fill('50')
+  assert not page.locator('#calculatorResults').is_hidden()
+  page.screenshot(path=str(OUT/'hs300-position-desktop.png'),full_page=True)
+  checks.append('disagreement and closed market still show holdings, zero overall action and separately labelled window scenarios in yuan')
+  checks.append('window labels explain comparison period, PE rank, ERP rank and single-window reference exposure')
+  checks.append('visible calculate button scrolls to results; input changes recalculate; zero valid and out-of-range input rejected')
+  page.unroute(endpoint)
   page.route(endpoint,lambda route:route.fulfill(status=503,content_type='application/json',body='{}'))
   page.route('**/api/hs300/dashboard',lambda route:route.fulfill(status=200,content_type='application/json',body=json.dumps(healthy)))
   button.click();ready()
@@ -75,7 +121,8 @@ def main():
   a['quality']['can_decide']=False;a['quote_quality']['status']='delayed'
   button.click();ready()
   assert '延迟' in page.locator('#quoteBadge').inner_text()
-  assert '不生成可执行' in page.locator('#positionAdvice').inner_text()
+  assert '不把情景转换成交易动作' in page.locator('#positionAdvice').inner_text()
+  assert '12,500.00' in page.locator('#scenarioRows').inner_text()
   checks.append('stale quote retains current valuation but blocks an executable amount')
   page.unroute(endpoint)
   page.route(endpoint,lambda route:route.fulfill(status=200,content_type='application/json',body='not-json'))
@@ -93,6 +140,9 @@ def main():
   page.wait_for_timeout(300)
   assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth+2')
   assert page.locator('#priceChart').bounding_box()['height']>=300
+  page.locator('#positionInput').fill('50')
+  page.get_by_role('button',name='测算我的仓位').click()
+  assert page.locator('#scenarioRows tr').count()==3
   page.screenshot(path=str(OUT/'hs300-live-mobile.png'),full_page=True)
   assert not errors,errors
   checks.append('mobile view fits viewport and chart; no page JavaScript errors')
