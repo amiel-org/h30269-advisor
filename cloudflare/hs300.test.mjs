@@ -175,9 +175,125 @@ test("refresh failure identifies stale fallback and blocks transaction advice", 
   const d = resultFromSettled(settled, null, { now });
   const env = memoryEnv([[DASH_KEY, JSON.stringify({ cached_at: new Date().toISOString(), data: d })]]);
   const fallback = await getHs300Dashboard(env, true, { builder: async () => { throw new Error("upstream unavailable"); } });
-  assert.equal(fallback.refresh_status, "stale");
+  assert.equal(fallback.refresh_status, "reference");
   assert.match(fallback.refresh_error, /upstream/);
   assert.equal(fallback.quality.actionable, false);
+});
+
+function mockIncremental(t, { price = raw.price, total = raw.total_return, fail = false } = {}) {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url) => {
+    const u = new URL(url); calls.push(u);
+    if (u.pathname.endsWith("index-perf-oneday")) return Response.json({ data: {} });
+    if (fail) { const error = new Error("The operation was aborted"); error.name = "AbortError"; throw error; }
+    if (u.pathname.endsWith("index-perf")) {
+      assert.ok(u.searchParams.get("startDate") >= "20260901", "warm update must not request full history");
+      const rows = u.searchParams.get("indexCode") === "000300" ? price : total;
+      return Response.json({ code: 200, data: rows.filter((r) => r.date >= u.searchParams.get("startDate"))
+        .map((r) => ({ tradeDate: r.date, close: r.close, peg: r.pe })) });
+    }
+    assert.equal(u.searchParams.get("pageNumber"), "1", "warm update must not download old bond pages");
+    return Response.json({ success: true, result: { pages: 20, data:
+      [...Object.entries(raw.bond10y).filter(([d]) => d >= "20260901"), ["20261015", 1.65]]
+        .map(([d, v]) => ({ SOLAR_DATE: `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`, EMM00166466: v })) } });
+  });
+  return calls;
+}
+
+test("after-close refresh preserves history while official new daily bars are unpublished", async (t) => {
+  const env = memoryEnv([["hs300:settled:v3", JSON.stringify({ ...settled, cached_at: now.toISOString() })]]);
+  const calls = mockIncremental(t);
+  const afternoon = new Date("2026-10-15T08:00:00Z");
+  const a = await buildHs300Result(env, { now: afternoon });
+  assert.equal(a.history_source, "incremental");
+  assert.equal(a.as_of, settled.series.dates.at(-1));
+  assert.equal(a.quality.status, "awaiting_close");
+  assert.equal(a.quality.actionable, false);
+  assert.equal(a.quality.analysis_available, true);
+  assert.ok(a.conditional_levels.buy);
+  assert.equal(a.source_warning, null);
+  const saved = JSON.parse(env.values.get(SETTLED_KEY));
+  assert.deepEqual(saved.series.dates, series.dates, "unchanged official dates preserve complete history");
+  assert.deepEqual(saved.series.pe, series.pe);
+  assert.deepEqual(saved.series.tr, series.tr);
+  assert.ok(saved.series.spread.every((v, i) => Math.abs(v - series.spread[i]) < 1e-12));
+  const before = calls.length;
+  const b = await buildHs300Result(env, { now: afternoon });
+  assert.equal(calls.length - before, 1, "ordinary repeated reads fetch at most the quote");
+  assert.deepEqual(a.windows, b.windows);
+});
+
+test("incremental update appends a newly published close without duplicating or dropping history", async (t) => {
+  const env = memoryEnv([[SETTLED_KEY, JSON.stringify({ ...settled, cached_at: now.toISOString() })]]);
+  mockIncremental(t, {
+    price: [...raw.price, { date: "20261014", close: 4217.68, pe: 12.99 }, { date: "20261015", close: 4165, pe: 12.83 }],
+    total: [...raw.total_return, { date: "20261014", close: 6338.35 }, { date: "20261015", close: 6260 }],
+  });
+  const result = await buildHs300Result(env, { now: new Date("2026-10-15T08:00:00Z"), forceCheck: true });
+  assert.equal(result.as_of, "20261015");
+  assert.equal(result.quality.actionable, true);
+  const saved = JSON.parse(env.values.get(SETTLED_KEY));
+  assert.equal(saved.series.dates.length, series.dates.length + 2);
+  assert.equal(new Set(saved.series.dates).size, saved.series.dates.length);
+  assert.deepEqual(saved.series.pe.slice(0, -12), series.pe.slice(0, -10));
+});
+
+test("long-lived validated history survives slow upstream and repeated failures back off", async (t) => {
+  const env = memoryEnv([[SETTLED_KEY, JSON.stringify({ ...settled, cached_at: "2026-10-13T01:00:00Z" })]]);
+  const calls = mockIncremental(t, { fail: true });
+  const afternoon = new Date("2026-10-15T08:00:00Z");
+  const a = await buildHs300Result(env, { now: afternoon });
+  assert.equal(a.as_of, settled.series.dates.at(-1));
+  assert.equal(a.quality.analysis_available, true);
+  assert.equal(a.quality.actionable, false);
+  assert.equal(a.quality.status, "source_unavailable", "after-close source outage must not masquerade as a normal publication delay");
+  assert.match(a.source_warning, /超时/);
+  assert.ok(!a.source_warning.includes("aborted"));
+  const before = calls.length;
+  const b = await buildHs300Result(env, { now: afternoon });
+  assert.equal(calls.length - before, 1);
+  assert.equal(b.quality.actionable, false, "cached failed check cannot turn actionable on next read");
+});
+
+test("existing dashboard returns immediately while stale check runs in the background", async () => {
+  const data = resultFromSettled(settled, null, { now });
+  const env = memoryEnv([[DASH_KEY, JSON.stringify({ cached_at: "2026-10-13T01:00:00Z", data })]]);
+  let release;
+  const built = new Promise((resolve) => { release = resolve; });
+  const tasks = [];
+  const response = await getHs300Dashboard(env, false, { builder: async () => built,
+    ctx: { waitUntil(p) { tasks.push(p); } } });
+  assert.equal(response.refresh_pending, true);
+  assert.equal(response.as_of, data.as_of);
+  assert.equal(tasks.length, 1);
+  release(data);
+  await tasks[0];
+  assert.equal(JSON.parse(env.values.get(DASH_KEY)).data.refresh_status, "fresh");
+});
+
+test("failed background check is dated and does not restart on the next GET", async () => {
+  const data = resultFromSettled(settled, null, { now });
+  const env = memoryEnv([[DASH_KEY, JSON.stringify({ cached_at: "2026-10-13T01:00:00Z", data })]]);
+  const tasks = [];
+  let calls = 0;
+  const options = { builder: async () => { calls += 1; throw new Error("timeout"); }, ctx: { waitUntil(p) { tasks.push(p); } } };
+  await getHs300Dashboard(env, false, options);
+  await tasks[0];
+  const again = await getHs300Dashboard(env, false, options);
+  assert.equal(calls, 1);
+  assert.equal(again.refresh_pending, false);
+  assert.equal(again.refresh_status, "reference");
+  assert.equal(again.quality.actionable, false);
+});
+
+test("incremental feed gaps cannot delete a previously confirmed observation", async (t) => {
+  const env = memoryEnv([[SETTLED_KEY, JSON.stringify({ ...settled, cached_at: now.toISOString() })]]);
+  const missing = series.dates.at(-3);
+  mockIncremental(t, { price: raw.price.filter((r) => r.date !== missing) });
+  const d = await buildHs300Result(env, { now: new Date("2026-10-15T08:00:00Z") });
+  assert.equal(d.history_source, "cache-fallback");
+  assert.match(d.source_warning, /缺口/);
+  assert.deepEqual(JSON.parse(env.values.get(SETTLED_KEY)).series.dates, series.dates);
 });
 
 test("hung refresh terminates with or without a saved dashboard", async () => {

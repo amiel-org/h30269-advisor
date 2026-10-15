@@ -24,7 +24,13 @@ function renderFreshness(d) {
   const pxDay = ymd(d.price_asof || d.as_of);
   const i = d.intraday;
   el.style.display = 'block';
-  if (d.refresh_status === 'stale' || !d.quality?.actionable) {
+  if (d.quality?.analysis_available && !d.quality.actionable) {
+    el.className = 'hs-fresh';
+    el.textContent = `分析依据：${pxDay} 已确认收盘，国债日期 ${ymd(d.bond?.as_of)}。` +
+      (d.quality.status === 'awaiting_close' ? '当天完整日线尚未取得，等待官方发布；下方保留上一收盘日分析，暂不生成新交易动作。' :
+        '本次数据源核验未完成，下方保留上一收盘日分析，暂不生成新交易动作。') +
+      (d.refresh_pending ? ' 正在后台核验，完成后页面会自动更新。' : ' 可稍后点击刷新核验。');
+  } else if (d.refresh_status === 'stale' || !d.quality?.actionable) {
     el.className = 'hs-fresh';
     el.textContent = `数据暂不可用于交易判断。最近收盘：${pxDay}；${(d.quality?.blockers || []).join('；')}`;
   } else if (i) {
@@ -48,8 +54,14 @@ function renderVerdict(d) {
   const c = d.consensus || {};
   if (!d.quality?.actionable) {
     hero.classList.add('wait');
-    $('#verdict').textContent = '暂停交易提示';
-    $('#verdictSay').textContent = (d.quality?.blockers || ['数据未通过时效检查']).join('；');
+    const reference = d.quality?.analysis_available;
+    $('#verdict').textContent = reference
+      ? (d.quality.status === 'awaiting_close' ? '等待新收盘数据' : '保留上次收盘分析') : '暂停交易提示';
+    const last = c.agreed && typeof c.exposure === 'number'
+      ? `三窗口目标 ${(c.exposure * 100).toFixed(1)}%` : '三窗口目标不一致，模型暂不调仓';
+    $('#verdictSay').textContent = reference
+      ? `${ymd(d.price_asof)} 收盘分析：${last}。新数据核验完成前不新增交易动作。`
+      : (d.quality?.blockers || ['数据未通过时效检查']).join('；');
   } else if (c.agreed && typeof c.exposure === 'number') {
     hero.classList.remove('wait');
     $('#verdict').textContent = `目标仓位 ${(c.exposure * 100).toFixed(1)}%`;
@@ -85,11 +97,14 @@ function renderActions(d) {
                    `</span>`;
     return li;
   };
-  if (!d.quality?.actionable) {
+  if (!d.quality?.actionable && !d.quality?.analysis_available) {
     host.appendChild(row('hold', '暂停', '数据不可用于交易判断，暂不展示买卖观察线。', ''));
     return;
   }
   const levels = d.conditional_levels || {};
+  const reference = !d.quality?.actionable;
+  if (reference) host.appendChild(row('hold', '历史参考',
+    `${ymd(d.price_asof)} 收盘分析的条件观察线，等待新数据后重新计算。`, '本轮不据此生成交易动作。'));
   for (const [kind, label] of [['buy', '加仓观察'], ['sell', '减仓观察']]) {
     const line = levels[kind];
     host.appendChild(row(kind, label, line
@@ -176,35 +191,72 @@ function render(d) {
 }
 
 async function load(force) {
+  clearTimeout(pollTimer);
   clearError();
   $('#refreshButton').disabled = true;
   $('#refreshButton').textContent = '刷新中…';
   $('#asOfText').textContent = force ? '正在更新数据' : '正在读取数据';
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), window.HS300_REQUEST_TIMEOUT_MS || 35000);
+  const request = async (url, method, milliseconds) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), window.HS300_REQUEST_TIMEOUT_MS || milliseconds);
+    try {
+      const response = await fetch(url, { method, cache: 'no-store', signal: controller.signal });
+      if (!response.ok) {
+        const error = new Error(`接口返回 HTTP ${response.status}`);
+        error.retryable = response.status >= 500;
+        throw error;
+      }
+      return await response.json();
+    } finally { clearTimeout(timeout); }
+  };
   try {
     const url = force ? '/api/hs300/refresh' : '/api/hs300/dashboard';
-    const resp = await fetch(url, { method: force ? 'POST' : 'GET', cache: 'no-store', signal: controller.signal });
-    if (!resp.ok) throw new Error(`接口返回 HTTP ${resp.status}`);
-    const body = await resp.json();
+    let body;
+    try { body = await request(url, force ? 'POST' : 'GET', force ? 15000 : 28000); }
+    catch (error) {
+      if (!error.retryable && error.name !== 'AbortError' && !(error instanceof TypeError)) throw error;
+      $('#asOfText').textContent = '连接波动，正在重试';
+      // A retry reads the existing dashboard, allowing its background refresh
+      // to finish without launching a second costly manual refresh.
+      body = await request('/api/hs300/dashboard', 'GET', 7000);
+    }
     if (!body.ok || !body.data || !body.data.consensus || !body.data.windows) throw new Error(body.error || '接口数据结构异常');
     render(body.data);
+    lastData = body.data;
     const stamp = body.data.server_time ? new Date(body.data.server_time).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '--';
-    $('#asOfText').textContent = `${body.data.refresh_status === 'stale' ? '旧快照' : '数据更新'} ${stamp}`;
+    const reference = body.data.quality?.analysis_available && !body.data.quality.actionable;
+    $('#asOfText').textContent = body.data.refresh_pending ? '后台核验中' : reference
+      ? `参考 ${ymd(body.data.price_asof)}` : `${body.data.refresh_status === 'stale' ? '旧快照' : '数据更新'} ${stamp}`;
     if (body.data.refresh_status === 'stale') showError(`本次刷新失败：${body.data.refresh_error}。已显示旧快照，交易提示暂停。`);
+    if (body.data.refresh_pending && pollCount < 5) {
+      pollCount += 1;
+      pollTimer = setTimeout(() => load(false), 3000);
+    } else if (!body.data.refresh_pending) pollCount = 0;
   } catch (e) {
     showError(e.name === 'AbortError' ? '加载超时：数据源响应较慢，请点击刷新重试。' : `加载失败：${e.message}`);
     $('#asOfText').textContent = '刷新失败，可重试';
-    $('#verdict').textContent = '暂停交易提示';
-    $('#verdictSay').textContent = '本次数据未能完成更新，暂不使用旧画面判断买卖。';
-    $('#actions').textContent = '数据未完成更新，观察线暂停。';
+    const day = lastData?.price_asof;
+    const stamp = day && Date.parse(`${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}T00:00:00+08:00`);
+    const age = stamp ? (Date.now() - stamp) / 86400000 : Infinity;
+    if (lastData && age >= 0 && age < 5 && lastData.quality?.analysis_available) {
+      render({ ...lastData, refresh_pending: false, quality: { ...lastData.quality,
+        actionable: false, analysis_available: true, status: 'source_unavailable' } });
+    } else {
+      $('#verdict').textContent = '暂停交易提示';
+      $('#verdictSay').textContent = '本次数据未能完成更新，暂不使用旧画面判断买卖。';
+      $('#actions').textContent = '数据未完成更新，观察线暂停。';
+    }
   } finally {
-    clearTimeout(timeout);
     $('#refreshButton').disabled = false;
     $('#refreshButton').textContent = '刷新';
   }
 }
 
-$('#refreshButton').addEventListener('click', () => load(true));
+let pollTimer = null;
+let pollCount = 0;
+let lastData = null;
+$('#refreshButton').addEventListener('click', () => {
+  clearTimeout(pollTimer); pollCount = 0; load(true);
+});
 load(false);
 if (window.lucide) window.lucide.createIcons();

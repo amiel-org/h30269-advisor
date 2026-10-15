@@ -1,5 +1,5 @@
 import config from "../config.json" with { type: "json" };
-import { getHs300Dashboard, refreshHs300 } from "./lib/hs300-dashboard.js";
+import { getHs300Dashboard, refreshHs300, SERVICE_VERSION as hs300ServiceVersion } from "./lib/hs300-dashboard.js";
 import { DEFAULT_CONFIG as hs300Config } from "./lib/hs300-model.js";
 
 const CSI_BASE = "https://www.csindex.com.cn/csindex-home";
@@ -877,7 +877,7 @@ function jsonResponse(payload, status = 200) {
   });
 }
 
-async function handleRequest(request, env) {
+async function handleRequest(request, env, ctx) {
   const url = new URL(request.url);
   if (url.pathname === "/api/health" && request.method === "GET") {
     return jsonResponse({ ok: true, time: chinaIso(), model_version: config.model_version, runtime: "cloudflare-worker" });
@@ -890,10 +890,10 @@ async function handleRequest(request, env) {
   }
   // ---- HS300 decision desk ---- //
   if (url.pathname === "/api/hs300/health" && request.method === "GET") {
-    return jsonResponse({ ok: true, time: chinaIso(), model_version: `hs300-${hs300Config.version}`, runtime: "cloudflare-worker" });
+    return jsonResponse({ ok: true, time: chinaIso(), model_version: `hs300-${hs300Config.version}`, service_version: hs300ServiceVersion, runtime: "cloudflare-worker" });
   }
   if (url.pathname === "/api/hs300/dashboard" && request.method === "GET") {
-    return jsonResponse({ ok: true, data: await getHs300Dashboard(env, false) });
+    return jsonResponse({ ok: true, data: await getHs300Dashboard(env, false, { ctx }) });
   }
   if (url.pathname === "/api/hs300/refresh" && request.method === "POST") {
     return jsonResponse({ ok: true, data: await getHs300Dashboard(env, true) });
@@ -906,9 +906,9 @@ async function handleRequest(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
-      return await handleRequest(request, env);
+      return await handleRequest(request, env, ctx);
     } catch (error) {
       return jsonResponse({ ok: false, error: error?.message || String(error) }, 500);
     }

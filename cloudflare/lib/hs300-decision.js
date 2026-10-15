@@ -126,3 +126,18 @@ export function dataQuality(series, bondDate, now = new Date()) {
   return { actionable: blockers.length === 0, blockers, price_date: latest, bond_date: bondDate,
     price_age_days: latest ? age(latest) : null, bond_age_days: bondDate ? age(bondDate) : null };
 }
+
+export function dashboardQuality(data, now = new Date(), sourceWarning = null) {
+  const base = dataQuality({ dates: [data.price_asof] }, data.bond?.as_of, now);
+  const cn = new Date(now.getTime() + 8 * 3600000);
+  const today = cn.toISOString().slice(0, 10).replaceAll("-", "");
+  const weekday = cn.getUTCDay() > 0 && cn.getUTCDay() < 6;
+  // This is a publication check, not an exchange-calendar claim. A holiday or
+  // a delayed feed both mean: no new close is available; do not fabricate one.
+  const awaiting = weekday && cn.getUTCHours() * 60 + cn.getUTCMinutes() >= 15 * 60 + 10 && data.price_asof < today;
+  const blockers = [...base.blockers];
+  if (awaiting) blockers.push("新收盘日线尚未取得，等待官方发布；上一收盘日分析仅供参考");
+  if (sourceWarning) blockers.push("数据源本次核验未完成，上一收盘日分析仅供参考");
+  return { ...base, actionable: blockers.length === 0, analysis_available: base.actionable,
+    blockers, status: !base.actionable ? "expired" : sourceWarning ? "source_unavailable" : awaiting ? "awaiting_close" : "ready" };
+}

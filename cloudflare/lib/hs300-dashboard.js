@@ -4,7 +4,7 @@
 // refresh path, and an appended history row per successful refresh.
 import { buildHs300Result } from "./hs300-data.js";
 import { DEFAULT_CONFIG } from "./hs300-model.js";
-import { dataQuality } from "./hs300-decision.js";
+import { dashboardQuality } from "./hs300-decision.js";
 
 // Cache the full payload briefly. Daily history has its own longer-lived cache;
 // a manual refresh obtains a new observation-only quote.
@@ -12,6 +12,21 @@ const CACHE_MS = 5 * 60 * 1000;
 export const DASH_KEY = "hs300:dashboard:v4";
 const HIST_KEY = "hs300:history";
 const inFlight = new WeakMap();
+export const SERVICE_VERSION = "v2.4.1";
+
+function readableError(error) {
+  return error?.name === "AbortError" || /abort|timeout/i.test(error?.message || "")
+    ? "数据源响应超时，稍后会重新核验" : (error?.message || "数据源暂不可用");
+}
+
+function referencePayload(data, { now = new Date(), error = null, refreshing = false } = {}) {
+  const warning = error || data.source_warning || data.refresh_error || null;
+  const quality = dashboardQuality(data, now, warning);
+  return { ...data, service_version: SERVICE_VERSION, quality,
+    refresh_status: refreshing ? "refreshing" : warning ? "reference" : "cached",
+    refresh_error: warning, last_attempt_at: error ? now.toISOString() : data.last_attempt_at,
+    refresh_pending: refreshing };
+}
 
 export async function kvGet(env, key) {
   if (!env.H30269_KV) return null;
@@ -51,13 +66,13 @@ async function saveHistory(env, result) {
   await kvPut(env, HIST_KEY, rows.slice(-400));
 }
 
-export async function refreshHs300(env, { recordHistory = true, builder = buildHs300Result, timeoutMs = 24000 } = {}) {
+export async function refreshHs300(env, { recordHistory = true, builder = buildHs300Result, timeoutMs = 22000, forceCheck = false } = {}) {
   const controller = new AbortController();
   let timer;
   let result;
   try {
     result = await Promise.race([
-      builder(env, { signal: controller.signal }),
+      builder(env, { signal: controller.signal, forceCheck }),
       new Promise((_, reject) => { timer = setTimeout(() => {
         controller.abort(); reject(new Error("数据源响应超时，请稍后重试"));
       }, timeoutMs); }),
@@ -65,7 +80,8 @@ export async function refreshHs300(env, { recordHistory = true, builder = buildH
   } finally { clearTimeout(timer); }
   if (recordHistory) await saveHistory(env, result);
   const payload = { ...result, history: await loadHistory(env), server_time: new Date().toISOString(),
-    refresh_status: "fresh", refresh_error: null };
+    service_version: SERVICE_VERSION, refresh_status: result.source_warning ? "reference" : "fresh",
+    refresh_error: result.source_warning || null, refresh_pending: false };
   await kvPut(env, DASH_KEY, { cached_at: new Date().toISOString(), data: payload });
   return payload;
 }
@@ -75,24 +91,27 @@ export async function getHs300Dashboard(env, force = false, options = {}) {
   const age = cached?.cached_at ? Date.now() - Date.parse(cached.cached_at) : Number.POSITIVE_INFINITY;
   const valid = cached?.data?.model_version === DEFAULT_CONFIG.version;
   if (!force && valid && age >= 0 && age < CACHE_MS) {
-    const quality = dataQuality({ dates: [cached.data.price_asof] }, cached.data.bond?.as_of);
-    return { ...cached.data, quality, refresh_status: "cached", cache_age_seconds: Math.floor(age / 1000) };
+    return { ...referencePayload(cached.data), cache_age_seconds: Math.floor(age / 1000) };
   }
   let pending = inFlight.get(env);
   if (!pending) {
-    pending = refreshHs300(env, { ...options, recordHistory: true });
+    pending = refreshHs300(env, { ...options, forceCheck: force, recordHistory: true });
     inFlight.set(env, pending);
   }
-  try {
-    return await pending;
-  } catch (error) {
-    if (valid) return { ...cached.data,
-      refresh_status: "stale", refresh_error: error.message,
-      cache_age_seconds: Math.max(0, Math.floor(age / 1000)),
-      quality: { ...cached.data.quality, actionable: false,
-        blockers: ["本次刷新失败，正在展示旧快照，暂停交易提示"] } };
-    throw error;
-  } finally {
+  const settled = pending.catch(async (error) => {
+    if (!valid) throw error;
+    const now = new Date();
+    const payload = referencePayload(cached.data, { now, error: readableError(error) });
+    // Persist the failed attempt time too: subsequent visits serve a dated
+    // reference immediately and do not hammer the unavailable upstream.
+    await kvPut(env, DASH_KEY, { cached_at: now.toISOString(), data: payload });
+    return payload;
+  }).finally(() => {
     if (inFlight.get(env) === pending) inFlight.delete(env);
+  });
+  if (!force && valid && options.ctx) {
+    options.ctx.waitUntil(settled.catch(() => {}));
+    return referencePayload(cached.data, { refreshing: true });
   }
+  return await settled;
 }

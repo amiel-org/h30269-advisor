@@ -7,13 +7,13 @@
 //
 // The bond series is forward-filled from PAST observations only.
 import { DEFAULT_CONFIG, buildSignals, metrics, percentileOfHistory, runBacktest } from "./hs300-model.js";
-import { conditionalLevels, confirmationState, dataQuality, signalDetail, valuationTable } from "./hs300-decision.js";
+import { conditionalLevels, confirmationState, dashboardQuality, signalDetail, valuationTable } from "./hs300-decision.js";
 
 const CSI_PERF = "https://www.csindex.com.cn/csindex-home/perf/index-perf";
 const EM_DATA = "https://datacenter-web.eastmoney.com/api/data/v1/get";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36";
 
-async function fetchJson(url, { referer, timeoutMs = 12000, retries = 1, signal } = {}) {
+async function fetchJson(url, { referer, timeoutMs = 10000, retries = 1, signal } = {}) {
   const headers = { "User-Agent": UA };
   if (referer) headers.Referer = referer;
   let lastError;
@@ -28,7 +28,8 @@ async function fetchJson(url, { referer, timeoutMs = 12000, retries = 1, signal 
       if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`);
       return await resp.json();
     } catch (error) {
-      lastError = error;
+      lastError = controller.signal.aborted || error?.name === "AbortError" || /aborted|timeout/i.test(error?.message || "")
+        ? new Error(signal?.aborted ? "刷新已结束，请稍后重试" : "数据源响应超时，请稍后重试") : error;
       if (attempt < retries) await new Promise((r) => setTimeout(r, 400 * attempt));
     } finally {
       clearTimeout(timer);
@@ -128,6 +129,20 @@ export async function fetchBond10y(signal) {
   return out;
 }
 
+async function fetchRecentBond(signal) {
+  const payload = await fetchJson(bondPageUrl(1), { signal, timeoutMs: 7000 });
+  if (!payload.success || !Array.isArray(payload.result?.data) || !payload.result.data.length) {
+    throw new Error("最新国债数据暂不可用");
+  }
+  const out = {};
+  for (const row of payload.result.data) {
+    const value = num(row.EMM00166466);
+    const date = String(row.SOLAR_DATE).slice(0, 10).replaceAll("-", "");
+    if (validDate(date) && value > 0) out[date] = value;
+  }
+  return out;
+}
+
 const dayStamp = (s) => Date.parse(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`);
 function validDate(d) { return /^\d{8}$/.test(d) && Number.isFinite(dayStamp(d)) && compact(new Date(dayStamp(d))) === d; }
 
@@ -158,23 +173,24 @@ export function alignSeries(priceRows, trRows, bond) {
 }
 
 export function compact(d) { return d.toISOString().slice(0, 10).replaceAll("-", ""); }
-export const SETTLED_KEY = "hs300:settled:v3";
-const SETTLED_MAX_AGE_MS = 12 * 3600000;
+export const SETTLED_KEY = "hs300:settled:v4";
+const LEGACY_SETTLED_KEY = "hs300:settled:v3";
+const HISTORY_CHECK_MS = 5 * 60000;
 
 function chinaNow(now) { return new Date(now.getTime() + 8 * 3600000); }
 async function readSettled(env, now) {
   try {
-    const raw = await env?.H30269_KV?.get(SETTLED_KEY);
+    const raw = await env?.H30269_KV?.get(SETTLED_KEY) || await env?.H30269_KV?.get(LEGACY_SETTLED_KEY);
     const cached = raw ? JSON.parse(raw) : null;
     const age = now.getTime() - Date.parse(cached?.cached_at);
-    if (!cached || !Number.isFinite(age) || age < 0 || age > SETTLED_MAX_AGE_MS) return null;
+    // Validated historical observations do not expire at 15:10 or overnight.
+    // They are the baseline for an incremental update, even during an outage.
+    if (!cached || !Number.isFinite(age) || age < 0) return null;
     const s = cached.series;
     if (!s || s.dates.length < 750 || ![s.pe, s.tr, s.spread].every((v) => Array.isArray(v) && v.length === s.dates.length && v.every(Number.isFinite))) return null;
     if (!s.dates.every((d, i) => validDate(d) && (i === 0 || d > s.dates[i - 1])) ||
       !s.pe.every((v) => v > 0) || !s.tr.every((v) => v > 0)) return null;
     if (!(cached.settled_price > 0) || !(cached.bond_last > 0) || !validDate(cached.bond_date || "")) return null;
-    const cn = chinaNow(now);
-    if (cn.getUTCDay() > 0 && cn.getUTCDay() < 6 && cn.getUTCHours() * 60 + cn.getUTCMinutes() >= 15 * 60 + 10 && s.dates.at(-1) < compact(cn)) return null;
     return cached;
   } catch { return null; }
 }
@@ -183,13 +199,64 @@ async function writeSettled(env, value) {
   try { await env?.H30269_KV?.put(SETTLED_KEY, JSON.stringify(value)); } catch { /* best effort */ }
 }
 
-export async function buildHs300Result(env = null, { now = new Date(), signal } = {}) {
+export async function buildHs300Result(env = null, { now = new Date(), signal, forceCheck = false } = {}) {
   const cn = chinaNow(now), end = compact(cn);
   // Fetch the quote and daily history concurrently, with a shared cancellation
   // signal. Fixed history start keeps the expanding window stable over time.
   const quotePromise = fetchIntraday("000300", signal);
   let settled = await readSettled(env, now);
   let historySource = "cache";
+  let historyError = null;
+  const checkedAge = now.getTime() - Date.parse(settled?.checked_at || settled?.cached_at);
+  if (settled && (forceCheck || checkedAge >= HISTORY_CHECK_MS)) {
+    try {
+      // Re-read a small overlap so delayed publications and recent revisions
+      // can be reconciled without redownloading the entire research sample.
+      const start = compact(new Date(dayStamp(settled.series.dates.at(-1)) - 14 * 86400000));
+      const [prices, totals, latestBond] = await Promise.all([
+        fetchCsiSeries("000300", start, end, 8000, signal),
+        fetchCsiSeries("H00300", start, end, 8000, signal),
+        fetchRecentBond(signal),
+      ]);
+      const complete = (r) => r.date < end || (r.date === end && cn.getUTCHours() * 60 + cn.getUTCMinutes() >= 15 * 60 + 10);
+      const bond = {};
+      for (let i = 0; i < settled.series.dates.length; i += 1) {
+        const d = settled.series.dates[i];
+        if (d >= start) bond[d] = 100 / settled.series.pe[i] - settled.series.spread[i];
+      }
+      for (const [d, value] of Object.entries(latestBond)) if (d <= end) bond[d] = value;
+      const priceRows = prices.filter(complete), trRows = totals.filter(complete);
+      const recent = alignSeries(priceRows, trRows, bond);
+      if (!recent.dates.length || recent.dates.at(-1) < settled.series.dates.at(-1)) {
+        throw new Error("数据源尚未返回完整的最近日线，保留已确认历史");
+      }
+      const recentDates = new Set(recent.dates);
+      if (settled.series.dates.some((d) => d >= recent.dates[0] && !recentDates.has(d))) {
+        throw new Error("最近日线存在缺口，保留已确认历史");
+      }
+      const series = {};
+      const firstRecent = recent.dates[0];
+      const cut = settled.series.dates.findIndex((d) => d >= firstRecent);
+      for (const field of ["dates", "tr", "pe", "spread"]) {
+        series[field] = [...settled.series[field].slice(0, cut < 0 ? undefined : cut), ...recent[field]];
+      }
+      const last = series.dates.at(-1);
+      const bondDate = Object.keys(latestBond).sort().filter((d) => d <= last).at(-1);
+      if (!bondDate) throw new Error("缺少最近日线对应的国债收益率");
+      settled = { ...settled, series, settled_price: priceRows.find((r) => r.date === last)?.close,
+        bond_last: latestBond[bondDate], bond_date: bondDate, checked_at: now.toISOString(),
+        cached_at: now.toISOString(), last_error: null };
+      await writeSettled(env, settled);
+      historySource = "incremental";
+    } catch (error) {
+      historyError = error.message;
+      // Back off after a failure too. A slow source must not cause every
+      // subsequent reader to repeat the same request storm.
+      settled = { ...settled, checked_at: now.toISOString(), last_error: historyError };
+      await writeSettled(env, settled);
+      historySource = "cache-fallback";
+    }
+  }
   if (!settled) {
     const [priceRaw, trRaw, bondRaw] = await Promise.all([
       fetchCsiSeries("000300", "20100101", end, 18000, signal),
@@ -204,15 +271,15 @@ export async function buildHs300Result(env = null, { now = new Date(), signal } 
     const last = series.dates.at(-1);
     const bondDate = Object.keys(bond).sort().filter((d) => d <= last).at(-1);
     settled = { series, settled_price: priceRows.find((r) => r.date === last)?.close,
-      bond_last: bond[bondDate], bond_date: bondDate, cached_at: now.toISOString() };
+      bond_last: bond[bondDate], bond_date: bondDate, cached_at: now.toISOString(), checked_at: now.toISOString(), last_error: null };
     await writeSettled(env, settled);
     historySource = "live";
   }
   const quote = await quotePromise;
-  return resultFromSettled(settled, quote, { now, historySource });
+  return resultFromSettled(settled, quote, { now, historySource, historyError: historyError || settled.last_error });
 }
 
-export function resultFromSettled(settled, quote = null, { now = new Date(), historySource = "cache" } = {}) {
+export function resultFromSettled(settled, quote = null, { now = new Date(), historySource = "cache", historyError = null } = {}) {
   const series = settled.series;
   const last = series.dates.length - 1;
   const signals = buildSignals(series);
@@ -230,11 +297,11 @@ export function resultFromSettled(settled, quote = null, { now = new Date(), his
   const quoteAge = quoteTime ? minute - (Number(quoteTime[1]) * 60 + Number(quoteTime[2])) : Infinity;
   const marketSession = (minute >= 570 && minute <= 690) || (minute >= 780 && minute <= 900);
   const live = Boolean(intraday && marketSession && quoteAge >= 0 && quoteAge <= 15);
-  const quality = dataQuality(series, settled.bond_date, now);
+  const quality = dashboardQuality({ price_asof: series.dates[last], bond: { as_of: settled.bond_date } }, now, historyError);
   const first = series.dates.indexOf(m.start);
   const buyHold = series.dates.slice(first).map((d, i) => [d, series.tr[first + i] / series.tr[first]]);
   const table = valuationTable(series, settled.settled_price);
-  const conditional = quality.actionable ? conditionalLevels(series, settled.settled_price, settled.bond_last) : null;
+  const conditional = quality.analysis_available ? conditionalLevels(series, settled.settled_price, settled.bond_last) : null;
   const average = run.exposures.reduce((a, b) => a + b, 0) / run.exposures.length;
   // A fixed INITIAL allocation drifts over time; it is a budget comparison,
   // not a volatility-matched benchmark (average exposure is known ex post).
@@ -244,6 +311,8 @@ export function resultFromSettled(settled, quote = null, { now = new Date(), his
     as_of: series.dates[last], price_asof: series.dates[last],
     quote_status: live ? "盘中报价仅供观察" : "已收盘数据",
     history_source: historySource, live, intraday,
+    input_checked_at: settled.checked_at || settled.cached_at,
+    source_warning: historyError,
     price_index: { code: "000300", level: settled.settled_price },
     total_return_index: { code: "H00300", level: series.tr[last] },
     pe: +series.pe[last].toFixed(4),
