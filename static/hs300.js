@@ -17,9 +17,9 @@ function renderPosition(){
  const box=$('#calculatorResults');
  if(!result.valid){box.hidden=true;$('#positionAdvice').textContent=result.reason;$('#calculatorMessage').textContent=result.reason;return;}
  box.hidden=false;
- const a=lastData.analysis,c=result.overall,capital=result.capital;
+ const a=result.analysis,c=result.overall,capital=result.capital;
  const currentText=`现仓 ${pct(result.current*100)}`;
- const stage=localOffline?'当前连接中断':quoteLabel(a);
+ const stage=localOffline?'当前连接中断':result.mode==='settled_review'?'正式收盘复核':quoteLabel(a);
  $('#calculatorMessage').textContent=`已计算：${currentText}；${capital===null?'未填写资金池金额，先展示比例。':`资金池 ${money(capital)}。`} ${stage}，下列情景仍可查看。`;
  $('#positionSummary').replaceChildren(...[
   ['你已持有',`${pct(result.current*100)}${capital===null?'':` / ${money(result.holdings)}`}`],
@@ -32,7 +32,8 @@ function renderPosition(){
  }else if(c.move===0){conclusion=`${currentText}，统一目标 ${pct(c.target*100)}；相差 ${pp(c.gap)}，在 ${pp(result.deadband)}死区以内，本次不调整${capital===null?'':`（0.00 元）`}。`;
  }else{conclusion=`${currentText}，统一目标 ${pct(c.target*100)}，总差额为${c.gap>0?'还差':'多出'} ${pp(c.gap)}。假设下一次只走一档：${c.move>0?'增加':'减少'} ${pp(c.move)}${capital===null?'':`（${money(Math.abs(c.moveAmount))}）`}，仓位变为 ${pct(c.after*100)}。`;
  }
- if(!result.canAct||localOffline)conclusion+=` ${result.agreed?'这是试算结果，':'下方分窗口只是比较。'}${localOffline?'连接未恢复':!result.analysisAvailable?'数据待恢复':!a.quality.can_decide?stage:'三窗口分歧'}，当前不把情景转换成交易动作。`;
+ if(!result.canAct||localOffline)conclusion+=` ${result.agreed?'这是试算结果，':'下方分窗口只是比较。'}${localOffline?'连接未恢复':result.reasons.join('；')||stage}，当前不把情景转换成交易动作。`;
+ else if(c.move!==0)conclusion+=result.mode==='intraday'?' 这是盘中条件执行方案，收盘后还需复核；实际成交后请更新仓位。':' 这是正式收盘复核方案，请在下一可交易时段执行，不要重复下单。';
  $('#positionAdvice').textContent=conclusion;$('#overallPlan').textContent=conclusion;
  $('#scenarioRows').replaceChildren(...result.rows.map((row)=>{
   const tr=document.createElement('tr');tr.dataset.window=row.key;

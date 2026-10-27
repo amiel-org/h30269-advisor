@@ -152,18 +152,19 @@
             <p id="decisionReason">等待最新数据返回</p>
           </div>
 
-          <div class="position-control">
-            <span>当前仓位</span>
-            <div class="segmented dark" role="group" aria-label="仓位选择">
-              <button data-position="无仓">无仓</button>
-              <button class="active" data-position="普通仓位">普通</button>
-              <button data-position="重仓">重仓</button>
+          <div class="position-control h30269-position-inputs">
+            <span>我的真实仓位</span>
+            <div class="h30269-position-grid">
+              <label>总仓位 <span><input id="h30269Current" type="number" min="0" max="100" step="0.1" placeholder="50" inputmode="decimal">%</span></label>
+              <label>其中战术仓 <span><input id="h30269Tactical" type="number" min="0" max="100" step="0.1" placeholder="10" inputmode="decimal">%</span></label>
+              <label>策略资金池 <span><input id="h30269Budget" type="number" min="0.01" step="any" placeholder="可不填" inputmode="decimal">元</span></label>
             </div>
+            <small>核心仓＝总仓位－战术仓；核心/战术上限70%/30%，以各自资金池为分母。</small>
           </div>
 
           <div class="position-action">
             <i data-lucide="route"></i>
-            <div><span>本次执行</span><p id="positionAdvice">--</p></div>
+            <div><span>本次执行</span><p id="positionAdvice">--</p><small id="positionDetail">填写真实仓位后生成盘中方案和收盘复核。</small></div>
           </div>
 
           <div class="confirmation-block">
@@ -283,6 +284,6 @@
   <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
   <script src="/static/vendor/lucide.min.js"></script>
-  <script src="/static/app.js"></script>
+  <script type="module" src="/static/app.js"></script>
 </body>
 </html>

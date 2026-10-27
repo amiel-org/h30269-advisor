@@ -655,7 +655,7 @@ export function evaluateRules(metrics, quality) {
       const note = intraday ? "；当前盘中值不计入确认" : "";
       return ruleResult("overheat_watch", "过热预警，等待收盘确认", `Beta调整后差值、绝对涨幅和MA250均已达标，但仅连续${confirmedCloses}/${required}个收盘日过热${note}`, { confirmed: false, scope: "战术仓", planned_pct: reducePct, timing: "停止新增，等待收盘确认" });
     }
-    if (intraday) return ruleResult("reduce_ready", "减仓条件已确认，等待收盘", "战术仓条件已全部确认；当前仍是盘中，只提示，等待当日收盘复核", { confirmed: true, scope: "战术仓", planned_pct: reducePct, timing: "收盘复核后执行" });
+    if (intraday) return ruleResult("reduce_ready", "盘中可减战术仓，收盘再复核", "此前的正式收盘确认已完成，当前盘中过热条件仍满足；可只减战术仓，收盘后独立复核，刷新不重复执行", { confirmed: true, scope: "战术仓", pct: reducePct, planned_pct: reducePct, timing: "盘中条件执行，收盘复核" });
     const coreConfirmed = Boolean(confirmation.core_confirmed) && highAboveYear && new Set(["中性", "股债弱支撑"]).has(support);
     if (coreConfirmed) return ruleResult("reduce_core_review", "核心仓降档复核，战术仓减5%", "相对过热连续5个收盘日，红利高于MA250至少10%，且股债性价比已降至中性或偏弱", { confirmed: true, scope: "核心仓复核 + 战术仓", pct: reducePct, core_action: "降档复核", timing: "分批执行，核心仓不一次清空" });
     return ruleResult(`reduce_tactical_${reducePct}`, `战术仓减${reducePct}%`, `Beta调整后过热已连续${required}个收盘确认，且红利自身40日涨幅和MA250位置均达标`, { confirmed: true, scope: "战术仓", pct: reducePct, core_action: "不动", timing: "分批执行" });
@@ -684,8 +684,8 @@ export function positionAdvice(evaluation) {
     heavy = `战术仓先减约${execution.pct}%；核心仓不动，不一次清仓。`;
   } else if (actionCode === "reduce_ready") {
     noPosition = "不追入，等待下一轮相对低估信号。";
-    normal = `盘中不执行；收盘复核后，战术仓计划减约${execution.planned_pct}%，核心仓不动。`;
-    heavy = `停止加仓；收盘复核后只处理战术仓约${execution.planned_pct}%，核心仓不动。`;
+    normal = `此前收盘确认已完成，盘中条件仍满足时可减战术仓约${execution.planned_pct}%，核心仓不动；收盘后复核。`;
+    heavy = `停止加仓；盘中只处理战术仓约${execution.planned_pct}%，核心仓不动；收盘后复核。`;
   } else if (new Set(["overheat_watch", "overheat_protected", "pause_add"]).has(actionCode)) {
     noPosition = "停止追入，等待Beta调整后差值回落或下一轮低估信号。";
     normal = "停止新增，当前不减仓；核心仓不动，等待全部条件确认。";

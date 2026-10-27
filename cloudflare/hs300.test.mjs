@@ -40,10 +40,34 @@ test("closed market leaves arithmetic usable but flags an agreed plan as a simul
   const data = positionFixture();data.analysis.quality.can_decide = false;
   data.analysis.consensus = { agreed: true, exposure: .625 };
   for (const w of Object.values(data.analysis.windows)) w.exposure = .625;
-  const r = calculatePosition(data,'25','100000');
+  const r = calculatePosition(data,'25','100000',{mode:'intraday'});
   assert.equal(r.valid,true);assert.equal(r.canAct,false);
   assert.equal(r.overall.move,.125);assert.equal(r.overall.moveAmount,12500);
   assert.equal(r.overall.after,.375);
+});
+
+test("intraday execution requires the same confirmed target and direction confirmation", () => {
+  const d=positionFixture();d.analysis.consensus={agreed:true,exposure:.25};
+  for(const w of Object.values(d.analysis.windows))w.exposure=.25;
+  d.execution={...d.execution,target:.25,buy_confirmed:true,sell_confirmed:false,confirmed_closes:1,sell_required:2};
+  const blocked=calculatePosition(d,'50','100000');
+  assert.equal(blocked.overall.move,-.125);assert.equal(blocked.canAct,false);
+  assert.match(blocked.reasons.join('；'),/卖出收盘确认不足/);
+  d.execution.sell_confirmed=true;d.execution.confirmed_closes=2;
+  assert.equal(calculatePosition(d,'50','100000').canAct,true);
+  d.execution.target=.375;
+  const mismatch=calculatePosition(d,'50','100000');
+  assert.equal(mismatch.targetMatches,false);assert.equal(mismatch.canAct,false);
+});
+
+test("settled review uses official windows without requiring an intraday quote", () => {
+  const d=positionFixture();d.analysis.quality.can_decide=false;
+  d.windows=structuredClone(d.analysis.windows);d.consensus={agreed:true,exposure:.375};
+  for(const w of Object.values(d.windows))w.exposure=.375;
+  d.quality={analysis_available:true,actionable:true};
+  d.execution={...d.execution,target:.375,buy_confirmed:true,sell_confirmed:true};
+  const r=calculatePosition(d,'50','100000');
+  assert.equal(r.mode,'settled_review');assert.equal(r.canAct,true);assert.equal(r.overall.move,-.125);
 });
 
 test("zero and full positions are valid; missing or invalid inputs never get silently coerced", () => {

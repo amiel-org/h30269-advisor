@@ -1068,12 +1068,13 @@ def evaluate_rules(
         if intraday:
             return result(
                 "reduce_ready",
-                "减仓条件已确认，等待收盘",
-                "战术仓条件已全部确认；当前仍是盘中，只提示，等待当日收盘复核",
+                "盘中可减战术仓，收盘再复核",
+                "此前的正式收盘确认已完成，当前盘中过热条件仍满足；可只减战术仓，收盘后独立复核，刷新不重复执行",
                 confirmed=True,
                 scope="战术仓",
+                pct=reduce_pct,
                 planned_pct=reduce_pct,
-                timing="收盘复核后执行",
+                timing="盘中条件执行，收盘复核",
             )
         core_confirmed = (
             bool(confirmation.get("core_confirmed"))
@@ -1128,8 +1129,8 @@ def position_advice(
     elif action_code == "reduce_ready":
         planned_pct = int(execution["planned_pct"])
         no_position = "不追入，等待下一轮相对低估信号。"
-        normal = f"盘中不执行；收盘复核后，战术仓计划减约{planned_pct}%，核心仓不动。"
-        heavy = f"停止加仓；收盘复核后只处理战术仓约{planned_pct}%，核心仓不动。"
+        normal = f"此前收盘确认已完成，盘中条件仍满足时可减战术仓约{planned_pct}%，核心仓不动；收盘后复核。"
+        heavy = f"停止加仓；盘中只处理战术仓约{planned_pct}%，核心仓不动；收盘后复核。"
     elif action_code in {"overheat_watch", "overheat_protected", "pause_add"}:
         no_position = "停止追入，等待Beta调整后差值回落或下一轮低估信号。"
         normal = "停止新增，当前不减仓；核心仓不动，等待全部条件确认。"

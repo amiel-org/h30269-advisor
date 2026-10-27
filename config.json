@@ -53,8 +53,15 @@
     "core_overheat_closes": 5
   },
   "execution": {
+    "position_denominator": "strategy_budget",
     "buy_tranche_pct": 20,
-    "reduce_pct": 5
+    "buy_tranche_unit": "budget_percentage_points",
+    "reduce_pct": 5,
+    "reduce_unit": "current_holdings_percent",
+    "core_cap_pct": 70,
+    "tactical_cap_pct": 30,
+    "heavy_position_pct": 80,
+    "intraday_reduce_enabled": true
   },
   "fallbacks": {
     "dividend_yield": {

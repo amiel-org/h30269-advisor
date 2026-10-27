@@ -1,3 +1,5 @@
+import { calculateH30269Position } from "/static/h30269-position.js";
+
 const state = {
   payload: null,
   position: "普通仓位",
@@ -63,7 +65,7 @@ function isBuyAction(evaluation) {
 
 function isSellAction(evaluation) {
   const code = String(evaluation?.action_code || "");
-  return code.startsWith("reduce_tactical_") || code === "reduce_core_review";
+  return code.startsWith("reduce_tactical_") || code === "reduce_core_review" || code === "reduce_ready";
 }
 
 function setText(selector, value) {
@@ -184,7 +186,7 @@ function renderDecisionChains(metrics, evaluation) {
   const execution = normalizeExecution(evaluation);
   const adjusted = adjustedSpread(metrics);
   const relativeLow = adjusted <= -1 && Boolean(metrics.beta_consensus?.robust_buy);
-  const supportGood = ["股债强支撑", "股债有支撑"].includes(metrics.bond_support);
+  const supportGood = ["股债强支撑", "股债有支撑", "中性"].includes(metrics.bond_support);
   const buyActive = isBuyAction(evaluation);
   const sellActive = isSellAction(evaluation);
   const overheat = adjusted >= 7 && Boolean(metrics.beta_consensus?.robust_overheat);
@@ -224,6 +226,23 @@ function renderBetaAudit(metrics) {
   );
 }
 
+function renderPositionDecision(result) {
+  const currentInput = $("#h30269Current");
+  const tacticalInput = $("#h30269Tactical");
+  if (!currentInput || !tacticalInput) return;
+  const plan = calculateH30269Position(result, currentInput.value, tacticalInput.value, $("#h30269Budget").value);
+  if (!plan.valid) {
+    setText("#positionAdvice", plan.reason);
+    setText("#positionDetail", "核心仓与战术仓均以本策略资金池为分母。 ");
+    return;
+  }
+  const money = (value) => plan.capital === null ? "" : `，约${number(Math.abs(value), 2)}元`;
+  const status = plan.canExecute ? "盘中条件执行" : plan.reviewReady ? "收盘复核方案" : "仅试算，暂不执行";
+  const action = plan.move > 0 ? `加仓${number(plan.move * 100, 1)}个百分点` : plan.move < 0 ? `减仓${number(-plan.move * 100, 1)}个百分点` : "保持现仓";
+  setText("#positionAdvice", `${status}：${action}${money(plan.moveAmount)}，总仓位变为${number(plan.after * 100, 1)}%。`);
+  setText("#positionDetail", `${plan.reason} 调整后核心仓${number(plan.coreAfter * 100, 1)}%，战术仓${number(plan.tacticalAfter * 100, 1)}%。`);
+}
+
 function renderSummary(payload) {
   const result = payload.result;
   const metrics = result.metrics;
@@ -240,7 +259,7 @@ function renderSummary(payload) {
   setText("#decisionReason", evaluation.reason);
   setText("#confidenceBadge", `置信度 ${result.quality.confidence}`);
   setText("#quoteStatus", sources.target.quote_status);
-  setText("#positionAdvice", result.position_advice[state.position]);
+  renderPositionDecision(result);
   setText("#topCoreAction", execution.core_action || "不动");
   setText("#topTiming", execution.timing || "继续观察");
   setText("#topRelative", percent(adjustedSpread(metrics)));
@@ -286,7 +305,7 @@ function renderSummary(payload) {
   let firstAction = "当前无动作";
   if (isBuyAction(evaluation) && execution.pct > 0) firstAction = `计划仓位加 ${execution.pct}%`;
   else if (isSellAction(evaluation) && execution.pct > 0) firstAction = `${execution.scope}减 ${execution.pct}%`;
-  else if (evaluation.action_code === "reduce_ready") firstAction = `收盘复核后减 ${execution.planned_pct}%`;
+  else if (evaluation.action_code === "reduce_ready") firstAction = `盘中条件减战术仓，收盘复核 ${execution.planned_pct}%`;
   else if (execution.planned_pct > 0 && adjustedSpread(metrics) >= 7) firstAction = `确认后战术仓减 ${execution.planned_pct}%`;
   setText("#firstActionText", firstAction);
 
@@ -643,13 +662,17 @@ function bindEvents() {
     });
   });
 
-  $$('[data-position]').forEach((button) => {
-    button.addEventListener("click", () => {
-      state.position = button.dataset.position;
-      $$('[data-position]').forEach((node) => node.classList.toggle("active", node === button));
-      if (state.payload) setText("#positionAdvice", state.payload.result.position_advice[state.position]);
+  for (const [id, key] of [["h30269Current", "h30269.current"], ["h30269Tactical", "h30269.tactical"], ["h30269Budget", "h30269.budget"]]) {
+    const input = $(`#${id}`);
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved !== null) input.value = saved;
+    } catch {}
+    input.addEventListener("input", () => {
+      try { localStorage.setItem(key, input.value); } catch {}
+      if (state.payload) renderPositionDecision(state.payload.result);
     });
-  });
+  }
 
   $$('[data-range]').forEach((button) => {
     button.addEventListener("click", () => {

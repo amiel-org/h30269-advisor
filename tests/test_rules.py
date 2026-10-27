@@ -254,7 +254,7 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(result["action_code"], "reduce_core_review")
         self.assertEqual(result["execution"]["core_action"], "降档复核")
 
-    def test_confirmed_signal_still_does_not_reduce_intraday(self):
+    def test_confirmed_signal_allows_intraday_tactical_reduction_with_close_review(self):
         quality = {"blockers": [], "warnings": []}
         result = advisor.evaluate_rules(
             overheat_metrics(
@@ -272,7 +272,8 @@ class RuleTests(unittest.TestCase):
             CONFIG,
         )
         self.assertEqual(result["action_code"], "reduce_ready")
-        self.assertEqual(result["execution"]["pct"], 0)
+        self.assertEqual(result["execution"]["pct"], 5)
+        self.assertEqual(result["execution"]["timing"], "盘中条件执行，收盘复核")
 
     def test_five_to_seven_only_pauses_additions(self):
         quality = {"blockers": [], "warnings": []}
