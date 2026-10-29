@@ -14,17 +14,28 @@ const FUNDS = [
 const FIELDS = "f57,f58,f43,f84,f85,f116,f117,f124";
 
 async function quote(secid, signal) {
-  const url = new URL("https://push2.eastmoney.com/api/qt/stock/get");
-  url.searchParams.set("secid", secid);
-  url.searchParams.set("fields", FIELDS);
-  const response = await fetch(url, { signal, cf: { cacheTtl: 0 }, headers: { "User-Agent": "Mozilla/5.0", Referer: "https://quote.eastmoney.com/" } });
-  if (!response.ok) throw new Error(`ETF 数据源 HTTP ${response.status}`);
-  const payload = await response.json();
-  if (!payload.data) throw new Error("ETF 数据源未返回有效行情");
-  // A cache populated with a narrower field list may omit f117. Never
-  // substitute total market cap: it would overstate the denominator.
-  if (secid === "1.000300" && !validNumber(payload.data.f117)) throw new Error("沪深300流通市值缺失");
-  return payload.data;
+  let lastError;
+  for (const host of ["push2.eastmoney.com", "push2delay.eastmoney.com"]) {
+    const url = new URL(`https://${host}/api/qt/stock/get`);
+    url.searchParams.set("secid", secid);
+    url.searchParams.set("fields", FIELDS);
+    url.searchParams.set("_", String(Date.now()));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    try {
+      const response = await fetch(url, { signal: controller.signal, cf: { cacheTtl: 0 }, headers: { "User-Agent": "Mozilla/5.0", Referer: "https://quote.eastmoney.com/" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      if (!payload.data) throw new Error("未返回有效行情");
+      // A cache populated with a narrower field list may omit f117. Never
+      // substitute total market cap: it would overstate the denominator.
+      if (secid === "1.000300" && !validNumber(payload.data.f117)) throw new Error("沪深300流通市值缺失");
+      return payload.data;
+    } catch (error) {
+      lastError = new Error(`${host}: ${controller.signal.aborted ? "响应超时" : error.message}`);
+    } finally { clearTimeout(timer); }
+  }
+  throw lastError;
 }
 
 function validNumber(value) {
