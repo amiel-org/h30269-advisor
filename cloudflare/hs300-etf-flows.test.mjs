@@ -62,7 +62,7 @@ test("Tencent fallback preserves real shares and float market cap units", async 
   t.after(() => { globalThis.fetch = original; });
   globalThis.fetch = async (url) => {
     if (String(url).includes("eastmoney")) return new Response("blocked", { status: 502 });
-    const fields = (n, index) => Array.from({ length: 72 }, (_, i) => i === 3 ? "4" : i === 30 ? "20261029104534" : i === 44 ? String(index ? 484751.83 : 1496.21) : i === 70 ? "36377587700" : "").join("~");
+    const fields = (n, index) => Array.from({ length: 77 }, (_, i) => i === 3 ? "4" : i === 30 ? "20261029104534" : i === 44 ? String(index ? 484751.83 : 1496.21) : i === 72 ? "36377587700" : "").join("~");
     const codes = ["sh510300", "sh510330", "sz159919", "sh510310", "sh000300"];
     return new Response(codes.map((c, i) => `v_${c}="${fields(c, i === 4)}";`).join("\n"));
   };

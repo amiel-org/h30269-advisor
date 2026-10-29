@@ -22,7 +22,7 @@ async function tencentQuotes(secids, signal) {
     const body = text.match(new RegExp(`v_${code}="([^"]+)"`))?.[1]?.split("~");
     if (!body || !validNumber(body[3])) throw new Error(`腾讯行情缺少 ${code}`);
     const isIndex = code === "sh000300";
-    return { f84: validNumber(body[70]), f116: validNumber(body[44]) * 1e8,
+    return { f84: validNumber(body[72]), f116: validNumber(body[44]) * 1e8,
       f117: isIndex ? validNumber(body[44]) * 1e8 : null,
       f124: Math.floor(Date.parse(`${body[30].replace(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/, "$1-$2-$3T$4:$5:$6+08:00")}`) / 1000) };
   });
