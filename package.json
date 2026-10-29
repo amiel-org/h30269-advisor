@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build:cloudflare": "node cloudflare/build.mjs",
-    "test:cloudflare": "node --test cloudflare/worker.test.mjs cloudflare/hs300.test.mjs cloudflare/position.test.mjs",
+    "test:cloudflare": "node --test cloudflare/worker.test.mjs cloudflare/hs300.test.mjs cloudflare/hs300-etf-flows.test.mjs cloudflare/position.test.mjs",
     "check:parity": "node cloudflare/parity.mjs",
     "dev:cloudflare": "npm run build:cloudflare && wrangler dev",
     "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",

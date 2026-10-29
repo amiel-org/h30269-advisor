@@ -7,6 +7,21 @@ const ymd=(d)=>d?.length===8?`${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`:d
 const ORDER=['full','10y','5y'];
 const LABEL={full:'全部历史', '10y':'近10年', '5y':'近5年'};
 let lastData=null,busy=false,pollTimer=null,polls=0,auto=true,localOffline=false;
+const signed=(v,d=2)=>Number.isFinite(v)?`${v>0?'+':''}${num(v,d)}`:'--';
+function renderEtfFlows(data){
+ $('#flowsAsOf').textContent=data.as_of?`${ymd(data.as_of)} · ${data.status==='fresh'?'已更新':'参考快照'}`:'暂不可用';
+ $('#flowRatio').textContent=pct(data.ratio_pct,3);
+ $('#flowValue').textContent=Number.isFinite(data.total_market_value)?`四只ETF合计 ${num(data.total_market_value/1e8,0)} 亿元`:'--';
+ for(const [days,suffix]of[[5,'5'],[20,'20']]){
+  const ratio=data[`ratio_change_${days}d_pp`],shares=data[`shares_change_${days}d_pct`];
+  $(`#flowRatio${suffix}`).textContent=Number.isFinite(ratio)?`${signed(ratio,3)} 个百分点`:'样本积累中';
+  $(`#flowShares${suffix}`).textContent=Number.isFinite(shares)?`四只ETF总份额 ${signed(shares,2)}%`:`需至少 ${days+1} 个交易快照`;
+ }
+ const rows=data.history||[];
+ $('#flowSparkline').innerHTML=rows.length>1?`<svg viewBox="0 0 800 90" preserveAspectRatio="none" aria-hidden="true"><polyline points="${rows.map((r,i)=>`${i/(rows.length-1)*800},${80-(r.ratio_pct/Math.max(...rows.map(x=>x.ratio_pct)))*65}`).join(' ')}"/></svg><span>系统已留存 ${rows.length} 个交易快照 · 仅展示占比相对走势</span>`:'';
+ $('#flowNotice').textContent=data.warning||(rows.length<6?'历史从本次启用开始积累；当前占比可用，5日/20日变化将在样本足够后自动出现。':'规模与份额分开观察；不把规模上升直接解释为托底买入。');
+}
+async function loadEtfFlows(force=false){try{const body=await request(`/api/hs300/etf-flows${force?'?refresh=1':''}`,'GET',10000);renderEtfFlows(body.data||{});}catch{renderEtfFlows({status:'unavailable',warning:'资金观察暂时连接失败，不影响上方估值与仓位分析。'});}}
 try { for(const [id,key]of[['positionInput','hs300.position'],['budgetInput','hs300.budget']]){const value=localStorage.getItem(key);if(value!==null)$('#'+id).value=value;} } catch {}
 const showError=(text)=>{$('#errorBanner').hidden=false;$('#errorBanner').textContent=text;};
 function quoteLabel(a){return {trading:'盘中即时测算',after_close:'收盘报价测算',lunch_break:'午间报价测算',before_open:'开盘前参考',delayed:'延迟报价测算',previous_session:'上一交易日报价',missing:'正式收盘参考',invalid:'行情时间异常'}[a.quote_quality?.status]||'当前点位测算';}
@@ -105,7 +120,7 @@ async function load(force=false){
  if(busy)return;busy=true;clearTimeout(pollTimer);$('#refreshButton').disabled=true;$('#refreshButton').textContent='刷新中…';$('#errorBanner').hidden=true;$('#errorBanner').textContent='';
  try{let body;try{body=await request(force?'/api/hs300/refresh':'/api/hs300/dashboard',force?'POST':'GET',force?16000:28000);}catch(e){if(!e.retryable&&e.name!=='AbortError'&&!(e instanceof TypeError))throw e;body=await request('/api/hs300/dashboard','GET',7000);}
  if(!body.ok||!body.data?.analysis||!body.data?.consensus)throw new Error(body.error||'接口数据结构异常');
- lastData=body.data;localOffline=false;render(lastData);$('#asOfText').textContent=body.data.refresh_pending?'更新报价中':`${ymd(lastData.analysis.date)} ${lastData.analysis.time||'收盘'}`;
+ lastData=body.data;localOffline=false;render(lastData);loadEtfFlows(force);$('#asOfText').textContent=body.data.refresh_pending?'更新报价中':`${ymd(lastData.analysis.date)} ${lastData.analysis.time||'收盘'}`;
  if(body.data.refresh_pending&&polls<6){polls++;pollTimer=setTimeout(()=>load(false),2500);}else polls=0;
  }catch(e){showError(e.name==='AbortError'?'加载超时：已保留上次分析，请稍后重试。':`加载失败：${e.message}`);$('#asOfText').textContent='连接失败，可重试';localOffline=true;
  if(lastData){render(lastData);}else{$('#verdict').textContent='数据待恢复';$('#verdictSay').textContent='暂未取得可分析行情，请点击刷新重试。';}

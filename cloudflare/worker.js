@@ -1,6 +1,7 @@
 import config from "../config.json" with { type: "json" };
 import { getHs300Dashboard, refreshHs300, SERVICE_VERSION as hs300ServiceVersion } from "./lib/hs300-dashboard.js";
 import { DEFAULT_CONFIG as hs300Config } from "./lib/hs300-model.js";
+import { getEtfFlows, refreshEtfFlows } from "./lib/hs300-etf-flows.js";
 
 const CSI_BASE = "https://www.csindex.com.cn/csindex-home";
 const DANJUAN_URL = "https://danjuanfunds.com/djapi/index_eva/detail/CSIH30269";
@@ -898,6 +899,9 @@ async function handleRequest(request, env, ctx) {
   if (url.pathname === "/api/hs300/refresh" && request.method === "POST") {
     return jsonResponse({ ok: true, data: await getHs300Dashboard(env, true) });
   }
+  if (url.pathname === "/api/hs300/etf-flows" && request.method === "GET") {
+    return jsonResponse({ ok: true, data: await getEtfFlows(env, { force: url.searchParams.get("refresh") === "1" }) });
+  }
   if (url.pathname.startsWith("/api/")) return jsonResponse({ ok: false, error: "接口不存在" }, 404);
   if (url.pathname === "/favicon.ico") return new Response(null, { status: 204 });
   // Cloudflare Assets handles /hs300 -> hs300.html automatically
@@ -916,5 +920,6 @@ export default {
   async scheduled(_controller, env, ctx) {
     ctx.waitUntil(refreshDashboard(env, { recordHistory: true }));
     ctx.waitUntil(refreshHs300(env, { recordHistory: true }));
+    ctx.waitUntil(refreshEtfFlows(env).catch(() => null));
   },
 };
