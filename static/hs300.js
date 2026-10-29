@@ -9,6 +9,7 @@ const LABEL={full:'全部历史', '10y':'近10年', '5y':'近5年'};
 let lastData=null,busy=false,pollTimer=null,polls=0,auto=true,localOffline=false;
 const signed=(v,d=2)=>Number.isFinite(v)?`${v>0?'+':''}${num(v,d)}`:'--';
 function renderEtfFlows(data){
+ $('#topFlowRatio').textContent=pct(data.ratio_pct,3);
  $('#flowsAsOf').textContent=data.as_of?`${ymd(data.as_of)} · ${data.status==='fresh'?'已更新':'参考快照'}`:'暂不可用';
  $('#flowRatio').textContent=pct(data.ratio_pct,3);
  $('#flowValue').textContent=Number.isFinite(data.total_market_value)?`四只ETF合计 ${num(data.total_market_value/1e8,0)} 亿元`:'--';

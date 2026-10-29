@@ -23,6 +23,7 @@
  <div class="decision-bar-item"><div><span>报价时间 · 北京时间</span><strong id="topQuoteTime">--</strong></div></div>
 </section>
 <div id="freshBanner" class="hs-fresh" role="status">正在获取最新报价与历史基准</div>
+<a class="hs-flow-entry" href="#etfFlows"><span>新增 · 头部 ETF 资金观察</span><strong><span id="topFlowRatio">读取中</span> <small>四只ETF市值 / 沪深300流通市值</small></strong><b>查看指标 ↓</b></a>
 <section class="market-stage">
  <div class="chart-stage">
   <div class="stage-head"><div><span class="section-label">000300 · 价格指数</span><h1>沪深300 日K与均线</h1></div><div class="trend-actions"><div class="segmented" role="group" aria-label="图表模式"><button class="active" data-mode="candles">K线</button><button data-mode="line">收盘</button><button data-mode="intraday">分时</button></div><div class="segmented" role="group" aria-label="图表范围"><button data-range="66">3月</button><button class="active" data-range="132">6月</button><button data-range="260">1年</button></div></div></div>
@@ -58,7 +59,7 @@
  <div class="hs-section hs-lines"><div class="hs-section-head"><span class="section-label">当前点位下的条件边界</span><h2>下一步盯哪里</h2></div><ul id="actions" class="hs-actions"><li>正在计算观察线</li></ul></div>
  <div class="hs-section hs-windows"><div class="hs-section-head"><span class="section-label">同一个沪深300 · 换三段历史作比较</span><h2>为什么三种参考仓位不同</h2></div><p class="hs-window-intro">“近10年”是比较约10年的历史，不是让你持有10年。PE位置越低，历史上越便宜；股债利差位置越高，盈利收益率相对国债越有吸引力。</p><div id="windows" class="hs-window-grid"></div><p class="hs-muted">下方“单窗口参考仓位”是各自的计算结果，不是收益率或胜率。只有三者一致，整体策略才给出调仓目标。</p><details class="hs-glossary"><summary>ERP 到底是什么？位置86.6%代表什么？</summary><p>这里的ERP是模型使用的股债利差代理：100 ÷ PE − 中国10年期国债收益率。它比较指数盈利收益率与国债利息，不是股息率，也不是预计能赚到的收益。</p><p>“历史位置86.6%”表示当前利差高于约86.6%的比较样本，不是86.6%的年化收益或胜率。同一当前数值，用不同历史长度比较，位置会不同。</p></details></div>
 </section>
-<section class="hs-section hs-flows" aria-labelledby="flowsTitle">
+<section id="etfFlows" class="hs-section hs-flows" aria-labelledby="flowsTitle">
  <div class="hs-section-head"><span class="section-label">辅助观察 · 不参与估值及买卖信号</span><h2 id="flowsTitle">头部 ETF 资金观察</h2><span id="flowsAsOf" class="hs-flows-date">数据读取中</span></div>
  <p class="hs-flows-intro">观察四只头部沪深300ETF的规模占比与份额变化。份额持续增加代表资金申购，但不能据此认定买方就是国家队。</p>
  <div class="hs-flow-grid"><div><span>头部ETF市值 / 沪深300流通市值</span><strong id="flowRatio">--</strong><small id="flowValue">--</small></div><div><span>近5日占比变化</span><strong id="flowRatio5">--</strong><small id="flowShares5">份额变化待积累</small></div><div><span>近20日占比变化</span><strong id="flowRatio20">--</strong><small id="flowShares20">份额变化待积累</small></div></div>
