@@ -99,7 +99,8 @@ export async function getEtfFlows(env, { force = false, now = new Date() } = {})
   try {
     return await refreshEtfFlows(env, { now });
   } catch (error) {
-    if (cached?.data) return { ...cached.data, status: "stale", warning: "本次资金数据更新失败，展示上次快照。" };
-    return { status: "unavailable", warning: "头部ETF资金数据暂不可用，不影响估值与仓位分析。", history: [], funds: [] };
+    const detail = `本次更新失败：${error?.message || "数据源连接异常"}`;
+    if (cached?.data) return { ...cached.data, status: "stale", warning: `${detail}，展示上次快照。` };
+    return { status: "unavailable", warning: `${detail}。资金观察暂不可用，不影响估值与仓位分析。`, history: [], funds: [] };
   }
 }
