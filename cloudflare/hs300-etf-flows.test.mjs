@@ -56,3 +56,19 @@ test("missing float market cap fails closed instead of using total market cap", 
   assert.equal(result.status, "unavailable");
   assert.equal(result.ratio_pct, undefined);
 });
+
+test("Tencent fallback preserves real shares and float market cap units", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("eastmoney")) return new Response("blocked", { status: 502 });
+    const fields = (n, index) => Array.from({ length: 72 }, (_, i) => i === 3 ? "4" : i === 30 ? "20261029104534" : i === 44 ? String(index ? 484751.83 : 1496.21) : i === 70 ? "36377587700" : "").join("~");
+    const codes = ["sh510300", "sh510330", "sz159919", "sh510310", "sh000300"];
+    return new Response(codes.map((c, i) => `v_${c}="${fields(c, i === 4)}";`).join("\n"));
+  };
+  const result = await refreshEtfFlows(memoryEnv());
+  assert.equal(result.source, "腾讯公开行情（备用）");
+  assert.equal(result.index_float_market_value, 48475183000000);
+  assert.equal(result.total_shares, 4 * 36377587700);
+  assert.ok(result.ratio_pct > 0);
+});

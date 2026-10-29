@@ -13,6 +13,21 @@ const FUNDS = [
 ];
 const FIELDS = "f57,f58,f43,f84,f85,f116,f117,f124";
 
+async function tencentQuotes(secids, signal) {
+  const codes = secids.map((s) => `${s.startsWith("0.") ? "sz" : "sh"}${s.slice(2)}`);
+  const response = await fetch(`https://qt.gtimg.cn/q=${codes.join(",")}`, { signal, headers: { "User-Agent": "Mozilla/5.0", Referer: "https://gu.qq.com/" } });
+  if (!response.ok) throw new Error(`腾讯行情 HTTP ${response.status}`);
+  const text = await response.text();
+  return codes.map((code) => {
+    const body = text.match(new RegExp(`v_${code}="([^"]+)"`))?.[1]?.split("~");
+    if (!body || !validNumber(body[3])) throw new Error(`腾讯行情缺少 ${code}`);
+    const isIndex = code === "sh000300";
+    return { f84: validNumber(body[70]), f116: validNumber(body[44]) * 1e8,
+      f117: isIndex ? validNumber(body[44]) * 1e8 : null,
+      f124: Math.floor(Date.parse(`${body[30].replace(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/, "$1-$2-$3T$4:$5:$6+08:00")}`) / 1000) };
+  });
+}
+
 async function quote(secid, signal) {
   let lastError;
   for (const host of ["push2.eastmoney.com", "push2delay.eastmoney.com"]) {
@@ -71,7 +86,15 @@ export function flowPresentation(current, history) {
 }
 
 export async function refreshEtfFlows(env, { now = new Date(), signal } = {}) {
-  const rows = await Promise.all([...FUNDS.map(([secid]) => quote(secid, signal)), quote("1.000300", signal)]);
+  const secids = [...FUNDS.map(([secid]) => secid), "1.000300"];
+  let rows;
+  let source = "东方财富公开行情";
+  try {
+    rows = await Promise.all(secids.map((secid) => quote(secid, signal)));
+  } catch {
+    rows = await tencentQuotes(secids, signal);
+    source = "腾讯公开行情（备用）";
+  }
   const index = rows.at(-1);
   const funds = rows.slice(0, -1).map((r, i) => ({
     code: FUNDS[i][1], manager: FUNDS[i][2], shares: validNumber(r.f84), market_value: validNumber(r.f116),
@@ -94,7 +117,7 @@ export async function refreshEtfFlows(env, { now = new Date(), signal } = {}) {
   const payload = {
     status: "fresh", as_of: date, quote_time: new Date(quoteTime.getTime() + 8 * 3600000).toISOString().slice(0, 19).replace("T", " "),
     ...current, ...flowPresentation(current, trimmed), funds,
-    sample_days: trimmed.length, source: "东方财富公开行情", unit: "人民币元",
+    sample_days: trimmed.length, source, unit: "人民币元",
     methodology: "四只头部沪深300ETF场内总市值合计 ÷ 沪深300流通市值。ETF市值按行情口径，非定期报告的国家队持仓。",
     limitation: "无法识别实际买家，不覆盖其他ETF、场外基金或直接持股。规模变化同时受份额、价格及分母变化影响；份额变化更适合辅助观察申购赎回。",
     signal_role: "仅作资金背景观察，不参与PE、ERP及买卖决策。",
