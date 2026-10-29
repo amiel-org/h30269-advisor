@@ -9,7 +9,7 @@
 <body class="hs-desk">
 <div class="app-shell">
 <header class="topbar">
-  <div class="brand"><span class="brand-mark"><i data-lucide="chart-candlestick"></i></span><div class="brand-copy"><strong>H30269 &amp; HS300</strong><span>沪深300 · 盘中决策台 v2.7.0</span></div></div>
+  <div class="brand"><span class="brand-mark"><i data-lucide="chart-candlestick"></i></span><div class="brand-copy"><strong>H30269 &amp; HS300</strong><span>沪深300 · 盘中决策台 v2.8.0</span></div></div>
   <nav class="hs-tabs" aria-label="决策台切换"><a href="/">红利低波</a><a href="/hs300" class="active">沪深300</a></nav>
   <div class="top-actions"><span id="asOfText" role="status">读取中</span><button id="autoButton" class="hs-btn active" aria-pressed="true">自动 30秒</button><button id="refreshButton" class="hs-btn">刷新</button></div>
 </header>
@@ -63,6 +63,8 @@
  <div class="hs-section-head"><span class="section-label">辅助观察 · 不参与估值及买卖信号</span><h2 id="flowsTitle">头部 ETF 资金观察</h2><span id="flowsAsOf" class="hs-flows-date">数据读取中</span></div>
  <p class="hs-flows-intro">观察四只头部沪深300ETF的规模占比与份额变化。份额持续增加代表资金申购，但不能据此认定买方就是国家队。</p>
  <div class="hs-flow-grid"><div><span>头部ETF市值 / 沪深300流通市值</span><strong id="flowRatio">--</strong><small id="flowValue">--</small></div><div><span>近5日占比变化</span><strong id="flowRatio5">--</strong><small id="flowShares5">份额变化待积累</small></div><div><span>近20日占比变化</span><strong id="flowRatio20">--</strong><small id="flowShares20">份额变化待积累</small></div></div>
+ <div id="flowReading" class="hs-flow-reading tone-wait"><div><span>一眼判断 · 20日优先</span><strong id="flowReadingTitle">暂不下结论</strong></div><p id="flowReadingBody">正在核对份额、占比与指数变化。</p><em id="flowReadingMeta">资金观察只辅助估值，不独立产生交易信号。</em></div>
+ <details class="hs-flow-rules"><summary>展开：箭头组合与结果对照表</summary><div class="hs-table-scroll"><table class="hs-table"><thead><tr><th>组合</th><th>程序标签</th><th>结果参考</th></tr></thead><tbody><tr><td>份额 ↑ · 占比 ↑ · 指数 ↓</td><td>逆势承接</td><td>有资金逆势流入；仅在主模型允许时，作为分批加仓辅助支持</td></tr><tr><td>份额 ↑ · 占比 ↑ · 指数 ↑</td><td>上涨吸金</td><td>有新增资金，但不是托底证据；避免追高</td></tr><tr><td>份额 平 · 占比 ↑ · 指数 ↑</td><td>价格推升</td><td>更像价格或分母变化，不算新增托底资金</td></tr><tr><td>份额 ↓ · 占比 ↓ · 指数 ↑</td><td>反弹赎回</td><td>资金借上涨撤离；可作为逢高减仓辅助警示</td></tr><tr><td>份额 ↓ · 占比 ↓ · 指数 ↓</td><td>资金撤离</td><td>承接减弱；主模型未允许前不逆势加仓</td></tr></tbody></table></div><p class="hs-muted">份额变化小于0.1%、占比变化小于0.01个百分点、指数变化小于0.1%时按“持平”处理，避免把微小波动放大成信号。</p></details>
  <div id="flowSparkline" class="hs-flow-spark" role="img" aria-label="头部ETF规模占比留存走势"></div>
  <p id="flowNotice" class="hs-muted">正在获取真实ETF份额和市值。</p>
  <details class="hs-glossary"><summary>口径与使用边界</summary><p>样本：510300、510330、159919、510310。占比 = 四只ETF场内总市值合计 ÷ 沪深300流通市值；占比上升不等于净买入，也可能来自价格或分母变化。</p><p>5日 / 20日变化按系统逐日留存的交易快照计算，样本不足时留空。该指标无法识别实际买家，也不覆盖其他ETF、场外联接基金或直接持股；只作政策托底与资金行为的辅助背景，不独立产生交易信号。</p></details>

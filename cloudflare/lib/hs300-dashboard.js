@@ -13,7 +13,7 @@ const CACHE_MS = 25 * 1000;
 export const DASH_KEY = "hs300:dashboard:v5";
 const HIST_KEY = "hs300:history";
 const inFlight = new WeakMap();
-export const SERVICE_VERSION = "v2.7.0";
+export const SERVICE_VERSION = "v2.8.0";
 
 function readableError(error) {
   return error?.name === "AbortError" || /abort|timeout/i.test(error?.message || "")

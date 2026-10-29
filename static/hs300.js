@@ -14,10 +14,15 @@ function renderEtfFlows(data){
  $('#flowRatio').textContent=pct(data.ratio_pct,3);
  $('#flowValue').textContent=Number.isFinite(data.total_market_value)?`四只ETF合计 ${num(data.total_market_value/1e8,0)} 亿元`:'--';
  for(const [days,suffix]of[[5,'5'],[20,'20']]){
-  const ratio=data[`ratio_change_${days}d_pp`],shares=data[`shares_change_${days}d_pct`];
+  const ratio=data[`ratio_change_${days}d_pp`],shares=data[`shares_change_${days}d_pct`],index=data[`index_change_${days}d_pct`];
   $(`#flowRatio${suffix}`).textContent=Number.isFinite(ratio)?`${signed(ratio,3)} 个百分点`:'样本积累中';
-  $(`#flowShares${suffix}`).textContent=Number.isFinite(shares)?`四只ETF总份额 ${signed(shares,2)}%`:`需至少 ${days+1} 个交易快照`;
+  $(`#flowShares${suffix}`).textContent=Number.isFinite(shares)?`份额 ${signed(shares,2)}% · 指数 ${Number.isFinite(index)?`${signed(index,2)}%`:'--'}`:`需至少 ${days+1} 个交易快照`;
  }
+ const reading=data.interpretation||{tone:'wait',title:'暂不下结论',action:'正在核对资金数据。',label:'样本积累中'};
+ $('#flowReading').className=`hs-flow-reading tone-${reading.tone||'neutral'}`;
+ $('#flowReadingTitle').textContent=reading.title||'暂不下结论';
+ $('#flowReadingBody').textContent=reading.action||'继续观察。';
+ $('#flowReadingMeta').textContent=`${reading.label||'观察'} · 只辅助估值，不独立产生交易信号。`;
  const rows=data.history||[];
  $('#flowSparkline').innerHTML=rows.length>1?`<svg viewBox="0 0 800 90" preserveAspectRatio="none" aria-hidden="true"><polyline points="${rows.map((r,i)=>`${i/(rows.length-1)*800},${80-(r.ratio_pct/Math.max(...rows.map(x=>x.ratio_pct)))*65}`).join(' ')}"/></svg><span>系统已留存 ${rows.length} 个交易快照 · 仅展示占比相对走势</span>`:'';
  $('#flowNotice').textContent=data.warning||(rows.length<6?'历史从本次启用开始积累；当前占比可用，5日/20日变化将在样本足够后自动出现。':'规模与份额分开观察；不把规模上升直接解释为托底买入。');

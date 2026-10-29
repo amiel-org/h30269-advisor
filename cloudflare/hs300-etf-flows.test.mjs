@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { flowPresentation, refreshEtfFlows, getEtfFlows } from "./lib/hs300-etf-flows.js";
+import { flowPresentation, interpretFlow, refreshEtfFlows, getEtfFlows } from "./lib/hs300-etf-flows.js";
 
 const memoryEnv = () => {
   const values = new Map();
@@ -20,12 +20,33 @@ test("ETF flow changes require complete session gaps and separate ratio from sha
   assert.ok(Math.abs(result.shares_change_20d_pct - 20 / 101 * 100) < .001);
 });
 
+test("five arrow combinations map to explicit, non-contradictory readings", () => {
+  const read = (shares, ratio, index) => interpretFlow({ shares, ratio, index, window: 20 });
+  assert.equal(read(1, .03, -1).title, "逆势承接");
+  assert.equal(read(1, .03, 1).title, "上涨吸金");
+  assert.equal(read(0, .03, 1).title, "价格推升");
+  assert.equal(read(-1, -.03, 1).title, "反弹赎回");
+  assert.equal(read(-1, -.03, -1).title, "资金撤离");
+  assert.equal(read(.01, 0, 0).title, "中性持平");
+  assert.match(read(-1, -.03, 1).action, /减仓/);
+  assert.match(read(0, .03, 1).action, /不算托底/);
+});
+
+test("twenty-day samples take priority and need index history", () => {
+  const rows = Array.from({ length: 21 }, (_, i) => ({ date: `2026-10-${String(i + 1).padStart(2, "0")}`,
+    ratio_pct: 1 + i * .001, total_shares: 100 + i, index_level: 4000 - i * 5 }));
+  const current = { date: "2026-10-22", ratio_pct: 1.03, total_shares: 121, index_level: 3900 };
+  const result = flowPresentation(current, rows);
+  assert.equal(result.interpretation.window, 20);
+  assert.equal(result.interpretation.title, "逆势承接");
+});
+
 test("live snapshot computes real ratio and repeated refresh cannot duplicate a day", async (t) => {
   const original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });
   globalThis.fetch = async (url) => {
     const index = String(url).includes("1.000300");
-    return new Response(JSON.stringify({ data: index ? { f117: 4000000 } : { f84: 100, f116: 250, f124: 1793238000 } }));
+    return new Response(JSON.stringify({ data: index ? { f43: 400000, f117: 4000000 } : { f84: 100, f116: 250, f124: 1793238000 } }));
   };
   const env = memoryEnv();
   const result = await refreshEtfFlows(env);
@@ -34,6 +55,7 @@ test("live snapshot computes real ratio and repeated refresh cannot duplicate a 
   assert.equal(result.ratio_pct, .025);
   assert.equal(result.sample_days, 1);
   assert.equal(result.ratio_change_5d_pp, null);
+  assert.equal(result.index_level, 4000);
   await refreshEtfFlows(env);
   assert.equal(JSON.parse(env.values.get("hs300:etf-flows:history:v1")).length, 1);
 });
@@ -68,6 +90,7 @@ test("Tencent fallback preserves real shares and float market cap units", async 
   };
   const result = await refreshEtfFlows(memoryEnv());
   assert.equal(result.source, "腾讯公开行情（备用）");
+  assert.equal(result.index_level, 4);
   assert.equal(result.index_float_market_value, 48475183000000);
   assert.equal(result.total_shares, 4 * 36377587700);
   assert.ok(result.ratio_pct > 0);
