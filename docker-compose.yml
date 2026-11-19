@@ -1,0 +1,38 @@
+name: h30269-advisor
+
+services:
+  h30269-advisor:
+    build: .
+    image: h30269-advisor:local-20261119
+    container_name: h30269-advisor
+    restart: unless-stopped
+    ports:
+      - "10.0.64.161:8888:8789"
+    environment:
+      TZ: Asia/Shanghai
+      TIME_ZONE: Asia/Shanghai
+      PORT: "8789"
+      DATA_DIR: /data
+      REFRESH_HOURS: "10,11,12,13,14,15"
+      REFRESH_MINUTE: "0"
+      RUN_ON_START: "true"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8789/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

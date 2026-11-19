@@ -25,6 +25,41 @@ npm run deploy:cloudflare
 
 Cloudflare 使用 `wrangler.jsonc`，静态资源由 `npm run build:cloudflare` 生成到忽略版本管理的 `cloudflare-dist\`。Python 本地版继续保留，作为离线备用和规则对照基线。
 
+## Docker 内网部署（公司网络）
+
+当前正式内网入口：
+
+```text
+http://10.0.64.161:8888/
+```
+
+部署文件：
+
+- `server.mjs`：把现有 `cloudflare/worker.js` 加载到 Node，使用本地 `data/kv.json` 代替 Cloudflare KV，并托管静态资源。
+- `Dockerfile`：Node 22 多阶段构建，运行时只保留 Worker、静态资源和本地适配层。
+- `docker-compose.yml`：固定内网端口 `10.0.64.161:8888:8789`，数据目录为 `./data`。
+- `.dockerignore`：避免把本地缓存、测试产物和设计稿带进镜像。
+
+刷新规则：
+
+- 工作日 `10:00、11:00、12:00、13:00、14:00、15:00` 自动刷新；
+- 容器启动后先执行一次预热刷新；
+- 时区固定为 `Asia/Shanghai`。
+
+常用命令：
+
+```bash
+docker compose up -d --build
+docker compose ps
+curl -fsS http://10.0.64.161:8888/api/health
+curl -fsS http://10.0.64.161:8888/__local/status
+docker compose logs -f h30269-advisor
+```
+
+本地状态接口不包含密钥，返回当前调度、上次完成时间和 KV 路径。
+
+内网版不启用 HTTPS，仅面向受信任公司网络。Cloudflare 入口保留作为外网备用。
+
 ## 本地网页版（离线备用）
 
 双击 `run_webapp.bat`，浏览器会打开：

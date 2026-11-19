@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 
 # Runtime data and reports
+data/
 cache/
 reports/
 output/
