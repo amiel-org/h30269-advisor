@@ -49,7 +49,7 @@ function decisionTone(evaluation) {
   const code = evaluation?.action_code || "";
   if (code.startsWith("buy_")) return "buy";
   if (code.startsWith("reduce_tactical_") || code === "reduce_core_review") return "sell";
-  if (["overheat_watch", "overheat_protected", "reduce_ready", "pause_add"].includes(code)) return "warn";
+  if (["overheat_watch", "overheat_protected", "reduce_ready", "pause_add", "valuation_high_watch"].includes(code)) return "warn";
   if (code === "hold") return "hold";
   const text = evaluation?.decision || String(evaluation || "");
   if (/买入|加仓|强买/.test(text)) return "buy";
@@ -187,15 +187,18 @@ function renderDecisionChains(metrics, evaluation) {
   const adjusted = adjustedSpread(metrics);
   const relativeLow = adjusted <= -1 && Boolean(metrics.beta_consensus?.robust_buy);
   const supportGood = ["股债强支撑", "股债有支撑", "中性"].includes(metrics.bond_support);
+  const pePct = metrics.pe_percentile ?? null;
+  const peBlocked = evaluation?.action_code === "valuation_high_watch" || (pePct !== null && pePct >= 80 && metrics.relative_zone !== "强买");
+  const valuationDetail = pePct !== null ? `${metrics.bond_support} · PE分位 ${number(pePct, 1)}%` : metrics.bond_support;
   const buyActive = isBuyAction(evaluation);
   const sellActive = isSellAction(evaluation);
   const overheat = adjusted >= 7 && Boolean(metrics.beta_consensus?.robust_overheat);
   const absoluteAndMa = metrics.target_40d_return_pct >= 5 && metrics.distance_ma250_pct >= 0;
 
   $("#buyChain").innerHTML = chainMarkup([
-    { label: "多窗口低估", detail: `调整差 ≤ -1% · 当前 ${percent(adjusted)}`, state: relativeLow ? "done" : "waiting", icon: "git-compare-arrows" },
-    { label: "股债支撑", detail: metrics.bond_support, state: supportGood ? "done" : "blocked", icon: "scale" },
-    { label: "分批执行", detail: buyActive ? `计划仓位 ${execution.pct}%` : "等待主信号", state: buyActive ? "action" : "waiting", icon: "layers-3" },
+    { label: "全收益多窗口低估", detail: `调整差 ≤ -1% · 当前 ${percent(adjusted)}`, state: relativeLow ? "done" : "waiting", icon: "git-compare-arrows" },
+    { label: "股债与PE闸门", detail: valuationDetail, state: supportGood && !peBlocked ? "done" : "blocked", icon: "scale" },
+    { label: "分档执行", detail: buyActive ? `计划仓位 +${execution.pct}%` : peBlocked ? "PE高分位拦截追买" : "等待主信号", state: buyActive ? "action" : "waiting", icon: "layers-3" },
   ]);
 
   $("#reduceChain").innerHTML = chainMarkup([
@@ -289,7 +292,15 @@ function renderSummary(payload) {
   setText("#bondYieldDetail", rate(metrics.bond10_pct, 4));
   setText("#bondSpreadDetail", percent(metrics.equity_bond_spread_pct));
   setText("#equityBondMultiple", `股债倍数 ${number(metrics.equity_bond_multiple)}x · ${metrics.bond_support}`);
-  setText("#qualityBadge", `数据完整 · 置信度 ${result.quality.confidence}`);
+  setText(
+    "#peValuationText",
+    metrics.pe && metrics.pe_percentile !== null && metrics.pe_percentile !== undefined
+      ? `滚动PE ${number(metrics.pe)}（历史分位 ${number(metrics.pe_percentile, 1)}%）`
+      : "滚动PE分位积累中",
+  );
+  const hasBlockers = Boolean(result.quality.blockers?.length);
+  setText("#qualityBadge", `${hasBlockers ? "数据受限" : "数据完整"} · 置信度 ${result.quality.confidence}`);
+  $("#qualityBadge")?.classList.toggle("blocked", hasBlockers);
   setText("#generatedAtText", `生成 ${result.generated_at.replace("T", " ")}`);
   setText("#asOfText", `${metrics.trade_date} ${sources.target.quote_status}`);
   $("#marketDot").className = "state-dot live";
@@ -331,12 +342,18 @@ function sourceItem(label, value, source, date, status, url) {
 function renderSources(result) {
   const m = result.metrics;
   const s = result.sources;
-  $("#sourceRows").innerHTML = [
+  const rows = [
     sourceItem("红利低波 H30269", number(m.close), s.target.source, m.trade_date, s.target.cache_status, s.target.source_url),
+  ];
+  if (s.target_total_return && m.tr_close) {
+    rows.push(sourceItem("红利低波全收益 H20269", number(m.tr_close), s.target_total_return.source, m.trade_date, s.target_total_return.cache_status, s.target_total_return.source_url));
+  }
+  rows.push(
     sourceItem("中证全指 000985", number(m.benchmark_close), s.benchmark.source, m.trade_date, s.benchmark.cache_status, s.benchmark.source_url),
     sourceItem("股息率", rate(m.dividend_yield_pct), s.dividend.source, s.dividend.as_of, s.dividend.status, s.dividend.source_url),
     sourceItem("10年国债收益率", rate(m.bond10_pct, 4), s.bond.source, s.bond.as_of, s.bond.status, s.bond.source_url),
-  ].join("");
+  );
+  $("#sourceRows").innerHTML = rows.join("");
 }
 
 function chartSlice(chart, range) {

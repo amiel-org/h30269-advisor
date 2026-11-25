@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,14 +7,18 @@ import { buildResult, roundTree } from "./worker.js";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const readJson = (path) => JSON.parse(readFileSync(join(root, path), "utf8"));
+const readOptionalJson = (path) => (existsSync(join(root, path)) ? readJson(path) : null);
 
 const target = readJson("cache/H30269.json");
 const benchmark = readJson("cache/000985.json");
+const targetTr = readOptionalJson("cache/H20269.json");
+const benchmarkTr = readOptionalJson("cache/H00985.json");
 const dividend = readJson("cache/dividend_yield.json");
 const bond = readJson("cache/bond_10y.json");
 const expected = readJson("latest.json");
+const warnings = (expected.quality?.warnings || []).filter((w) => /使用离线缓存|使用缓存/.test(w));
 const generatedAt = new Date(`${expected.generated_at}+08:00`);
-const actual = roundTree(buildResult(target, benchmark, dividend, bond, [], generatedAt).result);
+const actual = roundTree(buildResult(target, benchmark, dividend, bond, warnings, generatedAt, { targetTr, benchmarkTr }).result);
 
 assert.deepEqual(actual.metrics, expected.metrics, "Cloudflare metrics differ from Python metrics");
 assert.deepEqual(actual.quality, expected.quality, "Cloudflare data quality differs from Python");

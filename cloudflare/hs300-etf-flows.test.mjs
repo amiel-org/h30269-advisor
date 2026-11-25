@@ -95,3 +95,36 @@ test("Tencent fallback preserves real shares and float market cap units", async 
   assert.equal(result.total_shares, 4 * 36377587700);
   assert.ok(result.ratio_pct > 0);
 });
+
+test("after-hours f124=0 on weekend clamps to Friday and never fabricates weekend dates", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes("qt.gtimg.cn")) return new Response("offline", { status: 503 });
+    const index = u.includes("1.000300");
+    return new Response(JSON.stringify({ data: index ? { f43: 400000, f117: 4000000, f124: 0 } : { f84: 100, f116: 250, f124: 0 } }));
+  };
+  const env = memoryEnv();
+  // 2026-10-24 is Saturday (12:00 CST)
+  const saturday = new Date("2026-10-24T04:00:00Z");
+  const result = await refreshEtfFlows(env, { now: saturday });
+  assert.equal(result.as_of, "2026-10-23");
+  assert.equal(JSON.parse(env.values.get("hs300:etf-flows:history:v1"))[0].date, "2026-10-23");
+});
+
+test("abnormal >2x or <0.5x single-day share jump is rejected before corrupting KV history", async (t) => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const env = memoryEnv();
+  env.values.set("hs300:etf-flows:history:v1", JSON.stringify([
+    { date: "2026-10-22", ratio_pct: 0.025, total_shares: 400, total_market_value: 1000, index_float_market_value: 4000000, index_level: 4000 },
+  ]));
+  globalThis.fetch = async (url) => {
+    const index = String(url).includes("1.000300");
+    // 4 funds * 300 = 1200 shares (3.0x jump vs 400)
+    return new Response(JSON.stringify({ data: index ? { f43: 400000, f117: 4000000, f124: 1792742400 } : { f84: 300, f116: 750, f124: 1792742400 } }));
+  };
+  await assert.rejects(refreshEtfFlows(env), /跳变异常/);
+  assert.equal(JSON.parse(env.values.get("hs300:etf-flows:history:v1")).length, 1);
+});

@@ -1,6 +1,6 @@
 {
-  "version": "v2.4",
-  "as_of": "2026-10-15",
+  "version": "v2.5",
+  "as_of": "2026-11-25",
   "data": {
     "price_index": "000300",
     "total_return_index": "H00300",
@@ -83,8 +83,12 @@
       "hi": 70,
       "quantize": "floor"
     },
+    "hysteresis": {
+      "pe_percentile_pp": 2.0,
+      "erp_percentile_pp": 2.0
+    },
     "combine": "strict",
-    "note": "每个窗口各自算 min(pe_ladder, erp_gate)。三窗口历史均充足且目标完全一致才给信号；不一致（含相差1档）则 HOLD。该规则在同一历史样本中比较后选择，仍属于样本内研究，不能据此证明未来优势。",
+    "note": "各窗口带 ±2.0 分位点回滞缓冲以消除阈值附近锯齿调仓，随后计算 min(pe_ladder, erp_gate) 并向下量化至 12.5% 网格。三窗口均充足且目标一致才触发调仓；分歧则 HOLD，同时在仓位测算器中提示现仓是否超出三窗口上下沿区间。",
     "tolerance_steps": 0,
     "tolerance_rule": "conservative"
   },
@@ -97,7 +101,10 @@
     "sell_confirm_closes": 2,
     "fee_one_way": 0.0005,
     "cash_yield": 0.0,
-    "note": "deadband 是绝对仓位差阈值；买入1日确认、卖出2日确认"
+    "cash_yield_annual": 0.018,
+    "etf_fee_annual": 0.002,
+    "risk_free_annual": 0.018,
+    "note": "deadband 是绝对仓位差阈值；买入1日确认、卖出2日确认；回测按实际日历天数计入货基现金年化1.8%、ETF管理托管年费0.20%，夏普按超额收益（扣除1.8%无风险利率）计算"
   },
   "budget": {
     "denominator": "strategy_budget",

@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, erpGate, ladderExposure, percentileOfHistory, windowTargets } from "./hs300-model.js";
+import { DEFAULT_CONFIG, percentileOfHistory, windowStateAt, windowTargets } from "./hs300-model.js";
 import { conditionalLevels, dataQuality } from "./hs300-decision.js";
 
 const isoDay = (d) => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
@@ -7,7 +7,7 @@ const cnDate = (now) => new Date(now.getTime() + 8 * 3600000);
 export function quoteQuality(quote, now = new Date()) {
   if (!quote || !(quote.level > 0) || !/^\d{8}$/.test(quote.date || "")) return { available: false, can_decide: false, status: "missing", reason: "暂未取得最新报价" };
   const cn = cnDate(now), today = cn.toISOString().slice(0, 10).replaceAll("-", "");
-  const stamp = Date.parse(`${isoDay(quote.date)}T${(quote.time || "").length === 5 ? quote.time + ':00' : quote.time}+08:00`);
+  const stamp = Date.parse(`${isoDay(quote.date)}T${(quote.time || "").length === 5 ? quote.time + ":00" : quote.time}+08:00`);
   const age = (now.getTime() - stamp) / 1000;
   if (!Number.isFinite(age) || age < -120 || quote.date > today) return { available: false, can_decide: false, status: "invalid", reason: "行情时间异常，暂不生成动作" };
   const weekday = cn.getUTCDay() >= 1 && cn.getUTCDay() <= 5;
@@ -20,41 +20,49 @@ export function quoteQuality(quote, now = new Date()) {
     age_seconds: Math.max(0, age), reason: minute >= 900 ? "已收盘，按最近报价继续分析" : minute >= 690 ? "午间休市，按上午最新报价分析" : "尚未开盘，按最近报价分析" };
 }
 
-export function liveAnalysis(settled, quote, now = new Date()) {
+export function liveAnalysis(settled, quote, now = new Date(), { stateAtEnd = undefined } = {}) {
   const series = settled.series, baseDate = series.dates.at(-1);
+  const today = cnDate(now).toISOString().slice(0, 10).replaceAll("-", "");
   const q = quoteQuality(quote, now);
   if (q.available && quote.date < baseDate) {
     q.available = false; q.can_decide = false; q.status = "previous_session";
     q.reason = "报价早于当前官方日线，继续显示较新的收盘基准";
   }
-  const history = dataQuality(series, settled.bond_date, now);
+  // When a real-time quote for TODAY exists (e.g. first trading session after a
+  // 7-9 day Spring Festival / National Day holiday), allow bridging the holiday
+  // gap up to 14 calendar days instead of shutting down the intraday terminal.
+  const hasTodayQuote = Boolean(q.available && quote.date === today && quote.date >= baseDate);
+  const history = dataQuality(series, settled.bond_date, now, { allowHolidayGap: hasTodayQuote });
   const usable = q.available && quote.date >= baseDate && history.actionable;
   const price = usable ? quote.level : settled.settled_price;
   const date = usable ? quote.date : baseDate;
-  // A quote for the same day REPLACES that observation for comparison; a later
-  // quote uses every earlier daily bar. Repeated refreshes never add samples.
+
   let length = series.dates.findIndex((d) => d >= date);
   if (length < 0) length = series.dates.length;
   const peHist = series.pe.slice(0, length), erpHist = series.spread.slice(0, length);
+  const prevStates = (length === series.dates.length && stateAtEnd !== undefined)
+    ? stateAtEnd
+    : windowStateAt(series, length, DEFAULT_CONFIG);
+
   const ratio = price / settled.settled_price;
   const pe = series.pe.at(-1) * ratio;
   const candidate = settled.latest_bond;
   const bond = usable && candidate?.as_of <= date && candidate.value > 0 ? candidate : { value: settled.bond_last, as_of: settled.bond_date };
   const erp = 100 / pe - bond.value;
-  const detail = windowTargets(peHist, erpHist, pe, erp);
+  const detail = windowTargets(peHist, erpHist, pe, erp, DEFAULT_CONFIG, prevStates);
   const windows = Object.fromEntries(Object.entries(detail.windows).map(([k, w]) => {
     const spec = DEFAULT_CONFIG.indicators.percentile_windows.find((s) => s.name === k);
-    const count = spec.mode === 'rolling' ? Math.min(spec.days, length) : length;
+    const count = spec.mode === "rolling" ? Math.min(spec.days, length) : length;
     return [k, {
-    label: w.label, pe_percentile: w.pePercentile, erp_percentile: w.erpPercentile, exposure: w.exposure,
-    sample_count: count, history_start: series.dates[length - count], history_end: series.dates[length - 1],
-    pe_cap: w.pePercentile === null ? null : ladderExposure(w.pePercentile, DEFAULT_CONFIG.allocation.pe_ladder),
-    erp_cap: w.erpPercentile === null ? null : erpGate(w.erpPercentile, DEFAULT_CONFIG.allocation.erp_gate.lo, DEFAULT_CONFIG.allocation.erp_gate.hi),
-  }]; }));
+      label: w.label, pe_percentile: w.pePercentile, erp_percentile: w.erpPercentile, exposure: w.exposure,
+      sample_count: count, history_start: series.dates[length - count], history_end: series.dates[length - 1],
+      pe_cap: w.peCap, erp_cap: w.erpCap,
+    }];
+  }));
   const canDecide = usable && q.can_decide;
   const lines = history.actionable ? conditionalLevels(series, price, bond.value, DEFAULT_CONFIG, {
-    peNow: pe, peHist, erpHist, detail,
-    assumption: "按当前点位、最近官方PE所对应的盈利与最新已发布国债收益率估算。盈利、成分或利率更新后观察线重算；刷新不会计作收盘确认。",
+    peNow: pe, peHist, erpHist, detail, prevStates,
+    assumption: "按当前点位、最近官方PE所对应的盈利、最新已发布国债收益率及回滞状态估算。盈利、成分或利率更新后观察线重算；刷新不会计作收盘确认。",
   }) : null;
   return {
     mode: usable ? "quote_estimate" : "settled_reference", date, time: usable ? quote.time : null,
@@ -62,14 +70,20 @@ export function liveAnalysis(settled, quote, now = new Date()) {
     change_pct: usable ? quote.change_pct ?? null : null,
     source: usable ? quote.source || "中证指数" : "中证指数已发布日线",
     quote_quality: q, quality: { available: history.actionable, can_decide: canDecide,
-      reason: !history.actionable ? history.blockers.join("；") : !usable ? q.reason : q.reason },
+      holiday_bridged: history.holiday_bridged,
+      reason: !history.actionable ? history.blockers.join("；") : q.reason },
     pe: +pe.toFixed(6), pe_percentile: +percentileOfHistory(peHist, pe).toFixed(4),
     erp: +erp.toFixed(6), erp_percentile: +percentileOfHistory(erpHist, erp).toFixed(4),
-    bond, windows, consensus: { agreed: detail.agreed, exposure: detail.consensus_exposure, span: detail.span },
+    bond, windows,
+    consensus: {
+      agreed: detail.agreed, exposure: detail.consensus_exposure, span: detail.span,
+      min_exposure: detail.min_exposure, max_exposure: detail.max_exposure,
+    },
+    prev_window_state: prevStates,
     conditional_levels: lines,
     baseline: { date: baseDate, price: settled.settled_price, pe: series.pe.at(-1), sample_count: peHist.length },
     estimated: usable && (date !== baseDate || Math.abs(ratio - 1) > 1e-12),
-    assumptions: "PE按最新指数点位/基准收盘点位同比例估算，暂以基准盈利和成分不变；ERP使用带日期国债数据。盘中辅助方案未通过独立盘中回测。",
+    assumptions: "PE按最新指数点位/基准收盘点位同比例估算，暂以基准盈利和成分不变；ERP使用带日期国债数据，窗口含±2.0分位回滞缓冲。盘中辅助方案未通过独立盘中回测。",
   };
 }
 
@@ -86,8 +100,6 @@ export function buildPriceChart(priceRows = [], quote = null, now = new Date()) 
   const q = quoteQuality(quote, now);
   if (q.available && quote.date >= ([...rows.keys()].sort().at(-1)?.replaceAll("-", "") || "")) {
     const old = rows.get(isoDay(quote.date));
-    // Intraday extrema must come from a real quote/feed; never fabricate OHLC
-    // from a previous close or a total-return index.
     if (!old || quote.level !== old.close) {
       const open = quote.open, high = quote.high, low = quote.low;
       rows.set(isoDay(quote.date), { time: isoDay(quote.date), open, high, low, close: quote.level,

@@ -6,7 +6,7 @@ node_modules
 cloudflare-dist
 data
 cache
-reports
+/reports
 output
 tests
 design
@@ -15,5 +15,11 @@ __pycache__
 *.pyc
 *.log
 raw_data.json
+h30269/raw_data.json
+h30269/reports
+hs300/reports
+portfolio/reports/parity_expected.json
 latest.json
 latest.md
+!portfolio/config.json
+!portfolio/reports/results.json

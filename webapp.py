@@ -71,25 +71,31 @@ def rolling(values: list[float], window: int) -> list[float | None]:
 
 def chart_data(limit: int = 270) -> dict:
     config = advisor.load_config(advisor.DEFAULT_CONFIG)
-    target = load_json(APP_DIR / "cache" / "H30269.json")["rows"]
-    benchmark = load_json(APP_DIR / "cache" / "000985.json")["rows"]
-    target_map = {row["date"]: row for row in target}
-    benchmark_map = {row["date"]: row for row in benchmark}
-    dates = sorted(set(target_map) & set(benchmark_map))
-    aligned_target = [target_map[day] for day in dates]
-    aligned_benchmark = [benchmark_map[day] for day in dates]
+    target_bundle = advisor.SeriesBundle(**{**load_json(APP_DIR / "cache" / "H30269.json"), "code": "H30269"})
+    benchmark_bundle = advisor.SeriesBundle(**{**load_json(APP_DIR / "cache" / "000985.json"), "code": "000985"})
+    tr_code = config.get("total_return_code", "H20269")
+    bm_tr_code = config.get("benchmark_total_return_code", "H00985")
+    tr_path = APP_DIR / "cache" / f"{tr_code}.json"
+    bm_tr_path = APP_DIR / "cache" / f"{bm_tr_code}.json"
+    target_tr = advisor.SeriesBundle(**{**load_json(tr_path), "code": tr_code}) if tr_path.exists() else None
+    benchmark_tr = advisor.SeriesBundle(**{**load_json(bm_tr_path), "code": bm_tr_code}) if bm_tr_path.exists() else None
+
+    aligned_target, aligned_benchmark, sig_target, sig_bench, _ = advisor.align_series(
+        target_bundle, benchmark_bundle, target_tr, benchmark_tr
+    )
+    dates = [row["date"] for row in aligned_target]
     closes = [float(row["close"]) for row in aligned_target]
-    bench = [float(row["close"]) for row in aligned_benchmark]
+    sig_closes = [float(row["close"]) for row in sig_target]
+    sig_bench_closes = [float(row["close"]) for row in sig_bench]
     candles: list[dict[str, float | str]] = []
-    for day in dates:
-        row = target_map[day]
+    for row in aligned_target:
         close = float(row["close"])
-        open_value = float(row.get("open", close))
-        raw_high = float(row.get("high", max(open_value, close)))
-        raw_low = float(row.get("low", min(open_value, close)))
+        open_value = float(row.get("open") or close)
+        raw_high = float(row.get("high") or max(open_value, close))
+        raw_low = float(row.get("low") or min(open_value, close))
         candles.append(
             {
-                "time": day,
+                "time": row["date"],
                 "open": open_value,
                 "high": max(open_value, raw_high, raw_low, close),
                 "low": min(open_value, raw_high, raw_low, close),
@@ -110,15 +116,15 @@ def chart_data(limit: int = 270) -> dict:
     except Exception:
         pass
     for index in range(40, len(dates)):
-        target_return = closes[index] / closes[index - 40] - 1
-        benchmark_return = bench[index] / bench[index - 40] - 1
+        target_return = sig_closes[index] / sig_closes[index - 40] - 1
+        benchmark_return = sig_bench_closes[index] / sig_bench_closes[index - 40] - 1
         target_return40[index] = target_return * 100
         benchmark_return40[index] = benchmark_return * 100
         raw_relative40[index] = (target_return - benchmark_return) * 100
         beta_end = index - 1 if index == len(dates) - 1 and quote_status == "盘中" else index
         beta = advisor.estimate_beta(
-            aligned_target,
-            aligned_benchmark,
+            sig_target,
+            sig_bench,
             beta_end,
             int(beta_definition["trading_days"]),
             int(beta_definition["minimum_observations"]),
@@ -164,7 +170,9 @@ def report_history(limit: int = 20) -> list[dict]:
                         metrics.get("relative_spread_pct"),
                     ),
                     "signal_metric": (
-                        "Beta调整"
+                        "全收益Beta调整"
+                        if metrics.get("signal_return_basis") == "total_return"
+                        else "Beta调整"
                         if metrics.get("beta_adjusted_spread_pct") is not None
                         else "V2.2原始"
                     ),

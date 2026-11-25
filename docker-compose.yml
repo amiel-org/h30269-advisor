@@ -3,7 +3,7 @@ name: h30269-advisor
 services:
   h30269-advisor:
     build: .
-    image: h30269-advisor:local-20261119
+    image: h30269-advisor:local-v4.2
     container_name: h30269-advisor
     restart: unless-stopped
     ports:
@@ -13,8 +13,7 @@ services:
       TIME_ZONE: Asia/Shanghai
       PORT: "8789"
       DATA_DIR: /data
-      REFRESH_HOURS: "10,11,12,13,14,15"
-      REFRESH_MINUTE: "0"
+      REFRESH_SLOTS: "10:00,11:00,12:00,13:00,14:00,15:15,17:30,19:30"
       RUN_ON_START: "true"
     volumes:
       - ./data:/data

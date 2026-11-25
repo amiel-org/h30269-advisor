@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { DEFAULT_CONFIG, HOLD, buildSignals, metrics, runBacktest, windowTargets } from "./lib/hs300-model.js";
+import { DEFAULT_CONFIG, HOLD, buildSignals, metrics, runBacktest, windowStateAt, windowTargets } from "./lib/hs300-model.js";
 import { SETTLED_KEY, alignSeries, buildHs300Result, fetchIntraday, fetchTencentQuote, resultFromSettled } from "./lib/hs300-data.js";
 import { conditionalLevels, confirmationState, signalDetail } from "./lib/hs300-decision.js";
 import { DASH_KEY, getHs300Dashboard } from "./lib/hs300-dashboard.js";
@@ -148,7 +148,7 @@ test("live quote recomputes PE, ERP and windows without appending it to settled 
   assert.equal(a.quality.can_decide, true);
   assert.ok(Math.abs(a.pe - series.pe.at(-1)*.9) < 1e-6);
   assert.equal(a.baseline.sample_count, series.pe.length);
-  const expected = windowTargets(series.pe, series.spread, series.pe.at(-1)*.9, 100/(series.pe.at(-1)*.9)-settled.bond_last);
+  const expected = windowTargets(series.pe, series.spread, series.pe.at(-1)*.9, 100/(series.pe.at(-1)*.9)-settled.bond_last, DEFAULT_CONFIG, windowStateAt(series, series.dates.length));
   assert.equal(a.consensus.exposure, expected.consensus_exposure);
   assert.deepEqual(settled, copy);
   assert.deepEqual(liveAnalysis(settled, quote, now), a, "repeated refresh cannot count extra samples");
@@ -165,7 +165,7 @@ test("current conditional lines satisfy PE and ERP consensus under the SAME live
   for(const kind of ["buy","sell"]){
     const line=a.conditional_levels[kind];if(!line)continue;
     const pe=a.pe*line.level/a.price;
-    const detail=windowTargets(series.pe,series.spread,pe,100/pe-a.bond.value);
+    const detail=windowTargets(series.pe,series.spread,pe,100/pe-a.bond.value, DEFAULT_CONFIG, a.prev_window_state);
     assert.equal(detail.agreed,true);assert.equal(detail.consensus_exposure,line.target);
   }
 });
@@ -248,16 +248,40 @@ test("today's old quote is labelled historical rather than live", () => {
 test("conditional observation points satisfy ALL windows and the ERP gate", () => {
   const lines = conditionalLevels(series, settled.settled_price, settled.bond_last);
   const current = Object.values(signalDetail(series).windows).map((w) => w.exposure);
+  const stateEntering = windowStateAt(series, series.dates.length);
   for (const kind of ["buy", "sell"]) {
     const line = lines[kind];
     assert.ok(line, `fixture should have a ${kind} line`);
     const pe = series.pe.at(-1) * line.level / settled.settled_price;
-    const detail = windowTargets(series.pe, series.spread, pe, 100 / pe - settled.bond_last);
+    const detail = windowTargets(series.pe, series.spread, pe, 100 / pe - settled.bond_last, DEFAULT_CONFIG, stateEntering);
     assert.equal(detail.agreed, true);
     assert.equal(detail.consensus_exposure, line.target);
     assert.ok(kind === "buy" ? line.level < settled.settled_price && line.target > Math.max(...current)
       : line.level > settled.settled_price && line.target < Math.min(...current));
   }
+});
+
+test("post-holiday first trading session stays live when a same-day quote exists", () => {
+  // settled ends on 20261013; 20261022 is 9 calendar days later (simulating National Day / Spring Festival return)
+  const postHolidayNow = new Date("2026-10-22T06:00:00Z"); // Thursday 14:00 CST
+  const withQuote = liveAnalysis(settled, { date: "20261022", time: "14:00:00", level: 4180 }, postHolidayNow);
+  assert.equal(withQuote.quality.available, true);
+  assert.equal(withQuote.quality.can_decide, true);
+  assert.equal(withQuote.quality.holiday_bridged, true);
+
+  const withoutQuote = liveAnalysis(settled, null, postHolidayNow);
+  assert.equal(withoutQuote.quality.available, false);
+  assert.equal(withoutQuote.quality.can_decide, false);
+});
+
+test("out-of-band position warning surfaces risk without overriding strict consensus", () => {
+  const d = positionFixture();
+  d.analysis.windows = { full: { exposure: 0.25 }, "10y": { exposure: 0.25 }, "5y": { exposure: 0.125 } };
+  const r = calculatePosition(d, "75", "100000");
+  assert.equal(r.agreed, false);
+  assert.equal(r.overall.move, 0);
+  assert.equal(r.windowMax, 0.25);
+  assert.match(r.bandWarning, /高于全部窗口区间/);
 });
 
 test("HOLD resets close confirmation rather than counting repeated refreshes", () => {

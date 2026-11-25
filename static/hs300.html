@@ -9,8 +9,8 @@
 <body class="hs-desk">
 <div class="app-shell">
 <header class="topbar">
-  <div class="brand"><span class="brand-mark"><i data-lucide="chart-candlestick"></i></span><div class="brand-copy"><strong>H30269 &amp; HS300</strong><span>沪深300 · 盘中决策台 v2.8.0</span></div></div>
-  <nav class="hs-tabs" aria-label="决策台切换"><a href="/">红利低波</a><a href="/hs300" class="active">沪深300</a></nav>
+  <div class="brand"><span class="brand-mark"><i data-lucide="chart-candlestick"></i></span><div class="brand-copy"><strong>H30269 &amp; HS300</strong><span>沪深300 · 盘中决策台 v2.9.0</span></div></div>
+  <nav class="hs-tabs" aria-label="决策台切换"><a href="/">红利低波</a><a href="/hs300" class="active">沪深300</a><a href="/portfolio">双资产总池</a></nav>
   <div class="top-actions"><span id="asOfText" role="status">读取中</span><button id="autoButton" class="hs-btn active" aria-pressed="true">自动 30秒</button><button id="refreshButton" class="hs-btn">刷新</button></div>
 </header>
 <main class="hs-main">
@@ -49,7 +49,7 @@
  <p id="calculatorMessage" class="hs-calc-message" role="status" aria-live="polite">先在右侧填写当前仓位，再看整体结果及各窗口情景。</p>
  <div id="calculatorResults" hidden>
   <div id="positionSummary" class="hs-position-summary"></div>
-  <h3>整体结果</h3><p id="overallPlan" class="hs-overall-plan"></p>
+  <h3>整体结果</h3><div id="bandWarningBox" class="hs-band-warning" hidden></div><p id="overallPlan" class="hs-overall-plan"></p>
   <div class="hs-scenario-head"><h3>假如只按其中一个窗口，会怎样</h3><span>以下为单独情景，不是三个方案都要执行</span></div>
   <div class="hs-table-scroll"><table id="scenarioTable" class="hs-table"><thead><tr><th>单独看哪个历史窗口</th><th>参考仓位</th><th>与你现仓总差额</th><th>假设下一次只走一档</th><th>对应金额</th></tr></thead><tbody id="scenarioRows"></tbody></table></div>
   <p id="scenarioNote" class="hs-muted"></p>
@@ -73,7 +73,7 @@
  <div class="hs-section"><div class="hs-section-head"><span class="section-label">估值与股债比较</span><h2>当前测算 / 正式收盘</h2></div><table class="hs-table"><thead><tr><th>指标</th><th>当前测算</th><th>正式收盘</th></tr></thead><tbody><tr><td>沪深300点位</td><td id="px">--</td><td id="basePx">--</td></tr><tr><td>PE</td><td id="pe">--</td><td id="basePe">--</td></tr><tr><td>PE历史分位</td><td id="pep">--</td><td id="basePep">--</td></tr><tr><td>ERP</td><td id="erp">--</td><td id="baseErp">--</td></tr></tbody></table><p id="valuationNote" class="hs-muted">--</p></div>
  <div class="hs-section"><div class="hs-section-head"><span class="section-label">价格变化 → PE阶梯 → ERP闸门</span><h2>PE 估值参考阶梯</h2></div><div class="hs-table-scroll"><table id="ladder" class="hs-table"><thead><tr><th>PE分位</th><th>仓位上限</th><th>全历史下沿</th><th>近10年下沿</th><th>近5年下沿</th></tr></thead><tbody></tbody></table></div><p class="hs-muted">这是PE上限，实际目标还须经过ERP闸门及三窗口共识；表格点位不是直接交易指令。</p></div>
 </section>
-<section class="hs-section hs-research"><div class="hs-section-head"><span class="section-label">原收盘规则 · 样本内模拟</span><h2>历史表现与适用范围</h2></div><p id="backtestPeriod" class="hs-muted">--</p><div class="hs-research-grid"><div><span>年化收益</span><strong id="cagr">--</strong></div><div><span>最大回撤</span><strong id="mdd">--</strong></div><div><span>夏普比率</span><strong id="sharpe">--</strong></div><div><span>平均仓位 / 调仓</span><strong id="avgExp">--</strong></div><div><span>满仓持有：年化 / 回撤</span><strong id="buyHold">--</strong></div></div><details><summary>查看估值假设与模型边界</summary><p id="disclosure"></p></details></section>
+<section class="hs-section hs-research"><div class="hs-section-head"><span class="section-label">收盘规则 v2.5 · 样本内模拟</span><h2>历史表现与适用范围</h2></div><p id="backtestPeriod" class="hs-muted">--</p><div class="hs-research-grid"><div><span>年化收益</span><strong id="cagr">--</strong></div><div><span>最大回撤</span><strong id="mdd">--</strong></div><div><span>夏普比率</span><strong id="sharpe">--</strong></div><div><span>平均仓位 / 调仓</span><strong id="avgExp">--</strong></div><div><span>满仓持有：年化 / 回撤</span><strong id="buyHold">--</strong></div></div><details><summary>查看估值假设与模型边界</summary><p id="disclosure"></p></details></section>
 </main></div>
 <script src="/static/vendor/lightweight-charts.standalone.production.js"></script><script src="/static/vendor/lucide.min.js"></script><script type="module" src="/static/hs300.js"></script>
 </body></html>

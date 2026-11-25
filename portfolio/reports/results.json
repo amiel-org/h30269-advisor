@@ -1,0 +1,349 @@
+{
+  "version": "v1.0",
+  "sample": {
+    "start": "20171229",
+    "end": "20261013",
+    "trading_days": 2128,
+    "daily_return_correlation": 0.6701,
+    "standalone_exposure_correlation": 0.1408
+  },
+  "accounting": {
+    "fee_one_way": 0.0005,
+    "etf_fee_annual": 0.002,
+    "cash_yield_annual": 0.018,
+    "risk_free_annual": 0.018
+  },
+  "unified_v1_core50": {
+    "full": {
+      "start": "20171229",
+      "end": "20261013",
+      "cagr_calendar_pct": 9.2807,
+      "max_drawdown_pct": -14.8081,
+      "sharpe": 0.6778,
+      "sharpe_zero_rf": 0.8255,
+      "calmar": 0.6267,
+      "end_nav": 2.181126
+    },
+    "pre_2022": {
+      "start": "20171229",
+      "end": "20220104",
+      "cagr_calendar_pct": 11.4265,
+      "max_drawdown_pct": -14.8081,
+      "sharpe": 0.8067,
+      "sharpe_zero_rf": 0.9468,
+      "calmar": 0.7716,
+      "end_nav": 1.544077
+    },
+    "post_2022": {
+      "start": "20220104",
+      "end": "20261013",
+      "cagr_calendar_pct": 7.5067,
+      "max_drawdown_pct": -13.2732,
+      "sharpe": 0.559,
+      "sharpe_zero_rf": 0.7142,
+      "calmar": 0.5656,
+      "end_nav": 2.181126
+    },
+    "avg_hs300_pct": 27.96,
+    "avg_h30269_pct": 38.81,
+    "avg_total_equity_pct": 66.77,
+    "trades": 81,
+    "turnover": 7.4392
+  },
+  "siloed_50_50_core50": {
+    "full": {
+      "start": "20171229",
+      "end": "20261013",
+      "cagr_calendar_pct": 8.3671,
+      "max_drawdown_pct": -14.5956,
+      "sharpe": 0.6488,
+      "sharpe_zero_rf": 0.8095,
+      "calmar": 0.5733,
+      "end_nav": 2.025993
+    },
+    "pre_2022": {
+      "start": "20171229",
+      "end": "20220104",
+      "cagr_calendar_pct": 9.6699,
+      "max_drawdown_pct": -14.5956,
+      "sharpe": 0.7385,
+      "sharpe_zero_rf": 0.8941,
+      "calmar": 0.6625,
+      "end_nav": 1.448608
+    },
+    "post_2022": {
+      "start": "20220104",
+      "end": "20261013",
+      "cagr_calendar_pct": 7.2825,
+      "max_drawdown_pct": -12.4428,
+      "sharpe": 0.5687,
+      "sharpe_zero_rf": 0.7343,
+      "calmar": 0.5853,
+      "end_nav": 2.025993
+    },
+    "avg_hs300_pct": 25.98,
+    "avg_h30269_pct": 33.93,
+    "avg_total_equity_pct": 59.9,
+    "trades": 55,
+    "turnover": 4.5484
+  },
+  "unified_v1_cash0": {
+    "full": {
+      "start": "20171229",
+      "end": "20261013",
+      "cagr_calendar_pct": 9.5141,
+      "max_drawdown_pct": -13.9867,
+      "sharpe": 0.7265,
+      "sharpe_zero_rf": 0.8819,
+      "calmar": 0.6802,
+      "end_nav": 2.222688
+    },
+    "pre_2022": {
+      "start": "20171229",
+      "end": "20220104",
+      "cagr_calendar_pct": 12.3208,
+      "max_drawdown_pct": -13.9867,
+      "sharpe": 0.9624,
+      "sharpe_zero_rf": 1.1194,
+      "calmar": 0.8809,
+      "end_nav": 1.594652
+    },
+    "post_2022": {
+      "start": "20220104",
+      "end": "20261013",
+      "cagr_calendar_pct": 7.2063,
+      "max_drawdown_pct": -13.3138,
+      "sharpe": 0.5309,
+      "sharpe_zero_rf": 0.685,
+      "calmar": 0.5413,
+      "end_nav": 2.222688
+    },
+    "avg_hs300_pct": 29.07,
+    "avg_h30269_pct": 33.1,
+    "avg_total_equity_pct": 62.18,
+    "trades": 91,
+    "turnover": 7.9352
+  },
+  "siloed_50_50_cash0": {
+    "full": {
+      "start": "20171229",
+      "end": "20261013",
+      "cagr_calendar_pct": 8.7544,
+      "max_drawdown_pct": -13.634,
+      "sharpe": 0.7138,
+      "sharpe_zero_rf": 0.8834,
+      "calmar": 0.6421,
+      "end_nav": 2.090787
+    },
+    "pre_2022": {
+      "start": "20171229",
+      "end": "20220104",
+      "cagr_calendar_pct": 10.528,
+      "max_drawdown_pct": -13.634,
+      "sharpe": 0.8957,
+      "sharpe_zero_rf": 1.0706,
+      "calmar": 0.7722,
+      "end_nav": 1.49486
+    },
+    "post_2022": {
+      "start": "20220104",
+      "end": "20261013",
+      "cagr_calendar_pct": 7.2837,
+      "max_drawdown_pct": -12.4428,
+      "sharpe": 0.5689,
+      "sharpe_zero_rf": 0.7344,
+      "calmar": 0.5854,
+      "end_nav": 2.090787
+    },
+    "avg_hs300_pct": 26.12,
+    "avg_h30269_pct": 28.99,
+    "avg_total_equity_pct": 55.11,
+    "trades": 60,
+    "turnover": 4.6191
+  },
+  "standalone_hs300_v25": {
+    "full": {
+      "start": "20171229",
+      "end": "20261013",
+      "cagr_calendar_pct": 9.6058,
+      "max_drawdown_pct": -22.5016,
+      "sharpe": 0.6455,
+      "sharpe_zero_rf": 0.7784,
+      "calmar": 0.4269,
+      "end_nav": 2.239093
+    },
+    "pre_2022": {
+      "start": "20171229",
+      "end": "20220104",
+      "cagr_calendar_pct": 14.0706,
+      "max_drawdown_pct": -16.0365,
+      "sharpe": 0.9543,
+      "sharpe_zero_rf": 1.0873,
+      "calmar": 0.8774,
+      "end_nav": 1.696787
+    },
+    "post_2022": {
+      "start": "20220104",
+      "end": "20261013",
+      "cagr_calendar_pct": 5.9838,
+      "max_drawdown_pct": -22.5016,
+      "sharpe": 0.3853,
+      "sharpe_zero_rf": 0.5181,
+      "calmar": 0.2659,
+      "end_nav": 2.239093
+    },
+    "avg_hs300_pct": 49.43,
+    "avg_h30269_pct": 0.0,
+    "avg_total_equity_pct": 49.43,
+    "trades": 43,
+    "turnover": 4.9873
+  },
+  "standalone_h30269_v32": {
+    "full": {
+      "start": "20171229",
+      "end": "20261013",
+      "cagr_calendar_pct": 7.4809,
+      "max_drawdown_pct": -14.2545,
+      "sharpe": 0.5454,
+      "sharpe_zero_rf": 0.6969,
+      "calmar": 0.5248,
+      "end_nav": 1.884723
+    },
+    "pre_2022": {
+      "start": "20171229",
+      "end": "20220104",
+      "cagr_calendar_pct": 6.1969,
+      "max_drawdown_pct": -14.2545,
+      "sharpe": 0.4268,
+      "sharpe_zero_rf": 0.573,
+      "calmar": 0.4347,
+      "end_nav": 1.272822
+    },
+    "post_2022": {
+      "start": "20220104",
+      "end": "20261013",
+      "cagr_calendar_pct": 8.5737,
+      "max_drawdown_pct": -11.6797,
+      "sharpe": 0.6533,
+      "sharpe_zero_rf": 0.8098,
+      "calmar": 0.7341,
+      "end_nav": 1.884723
+    },
+    "avg_hs300_pct": 0.0,
+    "avg_h30269_pct": 69.21,
+    "avg_total_equity_pct": 69.21,
+    "trades": 255,
+    "turnover": 6.6784
+  },
+  "passive_50_50_rebalanced": {
+    "full": {
+      "start": "20171229",
+      "end": "20261013",
+      "cagr_calendar_pct": 5.6218,
+      "max_drawdown_pct": -28.3834,
+      "sharpe": 0.3178,
+      "sharpe_zero_rf": 0.4244,
+      "calmar": 0.1981,
+      "end_nav": 1.616373
+    },
+    "pre_2022": {
+      "start": "20171229",
+      "end": "20220104",
+      "cagr_calendar_pct": 6.4312,
+      "max_drawdown_pct": -28.3834,
+      "sharpe": 0.3451,
+      "sharpe_zero_rf": 0.4407,
+      "calmar": 0.2266,
+      "end_nav": 1.283817
+    },
+    "post_2022": {
+      "start": "20220104",
+      "end": "20261013",
+      "cagr_calendar_pct": 4.9454,
+      "max_drawdown_pct": -16.7109,
+      "sharpe": 0.293,
+      "sharpe_zero_rf": 0.4128,
+      "calmar": 0.2959,
+      "end_nav": 1.616373
+    },
+    "avg_hs300_pct": 49.88,
+    "avg_h30269_pct": 50.14,
+    "avg_total_equity_pct": 100.02,
+    "trades": 7,
+    "turnover": 1.7241
+  },
+  "passive_100_hs300": {
+    "full": {
+      "start": "20171229",
+      "end": "20261013",
+      "cagr_calendar_pct": 2.8814,
+      "max_drawdown_pct": -41.9245,
+      "sharpe": 0.1575,
+      "sharpe_zero_rf": 0.2497,
+      "calmar": 0.0687,
+      "end_nav": 1.28294
+    },
+    "pre_2022": {
+      "start": "20171229",
+      "end": "20220104",
+      "cagr_calendar_pct": 7.0644,
+      "max_drawdown_pct": -31.0948,
+      "sharpe": 0.36,
+      "sharpe_zero_rf": 0.446,
+      "calmar": 0.2272,
+      "end_nav": 1.314773
+    },
+    "post_2022": {
+      "start": "20220104",
+      "end": "20261013",
+      "cagr_calendar_pct": -0.5123,
+      "max_drawdown_pct": -32.4849,
+      "sharpe": -0.0379,
+      "sharpe_zero_rf": 0.0607,
+      "calmar": -0.0158,
+      "end_nav": 1.28294
+    },
+    "avg_hs300_pct": 100.05,
+    "avg_h30269_pct": 0.0,
+    "avg_total_equity_pct": 100.05,
+    "trades": 0,
+    "turnover": 1.0
+  },
+  "passive_100_h30269": {
+    "full": {
+      "start": "20171229",
+      "end": "20261013",
+      "cagr_calendar_pct": 7.4435,
+      "max_drawdown_pct": -27.646,
+      "sharpe": 0.4175,
+      "sharpe_zero_rf": 0.5213,
+      "calmar": 0.2692,
+      "end_nav": 1.8785
+    },
+    "pre_2022": {
+      "start": "20171229",
+      "end": "20220104",
+      "cagr_calendar_pct": 4.8511,
+      "max_drawdown_pct": -27.646,
+      "sharpe": 0.262,
+      "sharpe_zero_rf": 0.3579,
+      "calmar": 0.1755,
+      "end_nav": 1.208962
+    },
+    "post_2022": {
+      "start": "20220104",
+      "end": "20261013",
+      "cagr_calendar_pct": 9.6751,
+      "max_drawdown_pct": -14.1175,
+      "sharpe": 0.574,
+      "sharpe_zero_rf": 0.6863,
+      "calmar": 0.6853,
+      "end_nav": 1.8785
+    },
+    "avg_hs300_pct": 0.0,
+    "avg_h30269_pct": 100.04,
+    "avg_total_equity_pct": 100.04,
+    "trades": 0,
+    "turnover": 1.0
+  }
+}

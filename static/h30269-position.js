@@ -1,5 +1,5 @@
-// H30269 position arithmetic. All percentages use the independent strategy budget.
-// Core and tactical caps are a baseline (70/30), not a claim of optimal allocation.
+// H30269 V3.2 position arithmetic. All percentages use the independent strategy budget.
+// Core/tactical caps are 70%/30%, heavy cap 80%, and core floor 45% on core review.
 export function calculateH30269Position(result, currentText, tacticalText, budgetText = '') {
   const currentPct = Number(String(currentText ?? '').trim());
   const tacticalPct = Number(String(tacticalText ?? '').trim());
@@ -23,6 +23,7 @@ export function calculateH30269Position(result, currentText, tacticalText, budge
   const core = current - tactical;
   const tacticalCap = .30;
   const coreCap = .70;
+  const coreFloor = .45;
   const heavyLine = .80;
   let move = 0;
   let tacticalAfter = tactical;
@@ -38,17 +39,29 @@ export function calculateH30269Position(result, currentText, tacticalText, budge
       tacticalAfter = tactical + tacticalMove;
       move = Math.min(requested, tacticalMove + Math.max(0, coreCap - core));
       reason = move > 0
-        ? `估值与股债条件通过，本次增加${(move * 100).toFixed(1)}个百分点；先补战术仓，再补核心仓。`
+        ? `估值与股债条件通过，本次增加${(move * 100).toFixed(1)}个百分点（建议同向加仓间隔≥5个交易日）；先补战术仓，再补核心仓。`
         : '核心仓70%和战术仓30%的配置上限均已达到，不再新增。';
     }
-  } else if (code === 'reduce_ready' || code.startsWith('reduce_tactical_') || code === 'reduce_core_review') {
+  } else if (code === 'valuation_high_watch') {
+    reason = '红利低波PE位于历史高分位区（≥80%），防止高位追买，保持现有仓位观察。';
+  } else if (code === 'reduce_core_review') {
     direction = 'sell';
-    const requested = current * Number(execution.pct || execution.planned_pct || 0) / 100;
+    const requested = Number(execution.pct || execution.planned_pct || 10) / 100;
+    const tacCut = Math.min(requested, tactical);
+    const coreCut = Math.min(requested - tacCut, Math.max(0, core - coreFloor));
+    move = -(tacCut + coreCut);
+    tacticalAfter = tactical - tacCut;
+    reason = move < 0
+      ? `核心仓降档复核触发，本次减仓${(Math.abs(move) * 100).toFixed(1)}个百分点（先减战术仓，核心仓保留至少45%底仓）。`
+      : '战术仓为0且核心仓已不高于45%底仓线，保持现仓。';
+  } else if (code === 'reduce_ready' || code.startsWith('reduce_tactical_')) {
+    direction = 'sell';
+    const requested = Number(execution.pct || execution.planned_pct || 10) / 100;
     move = -Math.min(requested, tactical);
     tacticalAfter = tactical + move;
     reason = move < 0
-      ? `过热条件已确认，本次只减战术仓${(Math.abs(move) * 100).toFixed(1)}个百分点，核心仓不因本动作变化。`
-      : '当前没有可减的战术仓；核心仓只进入复核，不由本规则自动卖出。';
+      ? `过热条件已完整确认，本次只减战术仓${(Math.abs(move) * 100).toFixed(1)}个百分点，核心仓不动。`
+      : '当前没有可减的战术仓；核心仓未触发降档复核，保持不动。';
   }
   const after = current + move;
   if (Object.is(move, -0)) move = 0;
@@ -60,9 +73,9 @@ export function calculateH30269Position(result, currentText, tacticalText, budge
     valid: true, current, tactical, core, capital, direction, move, after, tacticalAfter,
     coreAfter: after - tacticalAfter, reason, canExecute,
     reviewRequired: code === 'reduce_ready',
-    reviewReady: signalReady && !intraday,
+    reviewReady: signalReady && !intraday && move !== 0,
     moveAmount: capital === null ? null : capital * move,
     afterAmount: capital === null ? null : capital * after,
-    tacticalCap, coreCap, heavyLine,
+    tacticalCap, coreCap, coreFloor, heavyLine,
   };
 }

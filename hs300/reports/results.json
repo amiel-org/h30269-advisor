@@ -1,5 +1,5 @@
 {
-  "config_version": "v2.4",
+  "config_version": "v2.5",
   "rows": 3647,
   "window": [
     "20140822",
@@ -9,60 +9,79 @@
     "start": "20140822",
     "end": "20261013",
     "years_calendar": 12.1424,
-    "cagr_calendar_pct": 8.0484,
-    "cagr_252_pct": 8.3722,
-    "max_drawdown_pct": -22.4081,
-    "sharpe": 0.7386,
-    "end_nav": 2.559805,
+    "cagr_calendar_pct": 9.7979,
+    "cagr_252_pct": 10.1953,
+    "max_drawdown_pct": -22.5003,
+    "sharpe": 0.7377,
+    "sharpe_zero_rf": 0.8906,
+    "end_nav": 3.111054,
     "days": 2947,
-    "trades": 91,
-    "turnover": 11.2122,
-    "avg_exposure": 0.412
+    "trades": 79,
+    "turnover": 9.7164,
+    "avg_exposure": 0.388
+  },
+  "model_zero_cash_zero_fee": {
+    "start": "20140822",
+    "end": "20261013",
+    "years_calendar": 12.1424,
+    "cagr_calendar_pct": 8.7028,
+    "cagr_252_pct": 9.054,
+    "max_drawdown_pct": -22.3575,
+    "sharpe": 0.8008,
+    "sharpe_zero_rf": 0.8008,
+    "end_nav": 2.754547,
+    "days": 2947,
+    "trades": 79,
+    "turnover": 9.7163
   },
   "variant_same_close_optimistic": {
     "start": "20140822",
     "end": "20261013",
     "years_calendar": 12.1424,
-    "cagr_calendar_pct": 7.8208,
-    "cagr_252_pct": 8.1351,
-    "max_drawdown_pct": -22.4093,
-    "sharpe": 0.7225,
-    "end_nav": 2.495086,
+    "cagr_calendar_pct": 9.4959,
+    "cagr_252_pct": 9.8805,
+    "max_drawdown_pct": -22.5656,
+    "sharpe": 0.716,
+    "sharpe_zero_rf": 0.8696,
+    "end_nav": 3.008727,
     "days": 2947,
-    "trades": 91,
-    "avg_exposure": 0.413
+    "trades": 79,
+    "avg_exposure": 0.39
   },
   "benchmark_buy_hold": {
     "start": "20140822",
     "end": "20261013",
     "years_calendar": 12.1424,
-    "cagr_calendar_pct": 7.33,
-    "cagr_252_pct": 7.6238,
-    "max_drawdown_pct": -46.0589,
-    "sharpe": 0.4492,
-    "end_nav": 2.360616,
+    "cagr_calendar_pct": 7.1153,
+    "cagr_252_pct": 7.4003,
+    "max_drawdown_pct": -46.128,
+    "sharpe": 0.3568,
+    "sharpe_zero_rf": 0.4396,
+    "end_nav": 2.303923,
     "days": 2947
   },
   "benchmark_matched_hold": {
     "start": "20140822",
     "end": "20261013",
     "years_calendar": 12.1424,
-    "cagr_calendar_pct": 3.7315,
-    "cagr_252_pct": 3.8785,
-    "max_drawdown_pct": -28.2926,
-    "sharpe": 0.3759,
-    "end_nav": 1.560252,
+    "cagr_calendar_pct": 4.2293,
+    "cagr_252_pct": 4.3963,
+    "max_drawdown_pct": -26.5788,
+    "sharpe": 0.2837,
+    "sharpe_zero_rf": 0.4455,
+    "end_nav": 1.653626,
     "days": 2947
   },
   "benchmark_matched_rebalanced": {
     "start": "20140822",
     "end": "20261013",
     "years_calendar": 12.1424,
-    "cagr_calendar_pct": 3.4917,
-    "cagr_252_pct": 3.6291,
-    "max_drawdown_pct": -21.2111,
-    "sharpe": 0.4458,
-    "end_nav": 1.517005,
+    "cagr_calendar_pct": 4.3583,
+    "cagr_252_pct": 4.5305,
+    "max_drawdown_pct": -19.539,
+    "sharpe": 0.3583,
+    "sharpe_zero_rf": 0.5715,
+    "end_nav": 1.678658,
     "days": 2947
   },
   "current_signal": {
@@ -73,25 +92,32 @@
     "pe_percentile": 56.09,
     "erp_percentile": 76.91,
     "target_exposure": "HOLD",
+    "consensus": "HOLD",
     "agreed": false,
     "windows": {
       "full": {
         "label": "全历史",
         "pe_percentile": 56.0889,
         "erp_percentile": 76.9062,
-        "exposure": 0.375
+        "exposure": 0.375,
+        "pe_cap": 0.375,
+        "erp_cap": 1.0
       },
       "10y": {
         "label": "近10年",
         "pe_percentile": 47.418,
         "erp_percentile": 82.1721,
-        "exposure": 0.625
+        "exposure": 0.625,
+        "pe_cap": 0.625,
+        "erp_cap": 1.0
       },
       "5y": {
         "label": "近5年",
         "pe_percentile": 65.9836,
         "erp_percentile": 65.7377,
-        "exposure": 0.125
+        "exposure": 0.125,
+        "pe_cap": 0.125,
+        "erp_cap": 0.855738
       }
     }
   }

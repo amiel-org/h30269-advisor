@@ -72,7 +72,7 @@ assert.equal(jsHold, expected.hold_days, `HOLD days js=${jsHold} py=${expected.h
 
 // ---- 2. backtest metrics must match ---- //
 const run = runBacktest(series, undefined, null, 1);
-const m = metrics(run.curve);
+const m = metrics(run.curve, 252, DEFAULT_CONFIG.execution.risk_free_annual || 0);
 const exp = expected.metrics;
 // Python emits snake_case; map each metric to its reference key.
 const metricMap = [

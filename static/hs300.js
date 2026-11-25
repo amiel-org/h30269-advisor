@@ -49,13 +49,15 @@ function renderPosition(){
  ].map(([label,value])=>{const div=document.createElement('div');const span=document.createElement('span');span.textContent=label;const strong=document.createElement('strong');strong.textContent=value;div.append(span,strong);return div;}));
  let conclusion;
  if(!result.analysisAvailable){conclusion=`${currentText}。行情基准未通过有效性检查，下面只保留已有数字的条件试算，不生成交易动作。`;}
- else if(!result.agreed){conclusion=`${currentText} → 保持 ${pct(result.current*100)}，本次调整 0 个百分点${capital===null?'':`（0.00 元）`}。原因是三个窗口没有统一目标，并不是没有完成计算。`;
+ else if(!result.agreed){conclusion=`${currentText} → 保持 ${pct(result.current*100)}，本次调整 0 个百分点${capital===null?'':`（0.00 元）`}。原因是三个窗口没有统一目标，并不是没有完成计算。${result.bandWarning?` ${result.bandWarning}。`:''}`;
  }else if(c.move===0){conclusion=`${currentText}，统一目标 ${pct(c.target*100)}；相差 ${pp(c.gap)}，在 ${pp(result.deadband)}死区以内，本次不调整${capital===null?'':`（0.00 元）`}。`;
  }else{conclusion=`${currentText}，统一目标 ${pct(c.target*100)}，总差额为${c.gap>0?'还差':'多出'} ${pp(c.gap)}。假设下一次只走一档：${c.move>0?'增加':'减少'} ${pp(c.move)}${capital===null?'':`（${money(Math.abs(c.moveAmount))}）`}，仓位变为 ${pct(c.after*100)}。`;
  }
  if(!result.canAct||localOffline)conclusion+=` ${result.agreed?'这是试算结果，':'下方分窗口只是比较。'}${localOffline?'连接未恢复':result.reasons.join('；')||stage}，当前不把情景转换成交易动作。`;
  else if(c.move!==0)conclusion+=result.mode==='intraday'?' 这是盘中条件执行方案，收盘后还需复核；实际成交后请更新仓位。':' 这是正式收盘复核方案，请在下一可交易时段执行，不要重复下单。';
  $('#positionAdvice').textContent=conclusion;$('#overallPlan').textContent=conclusion;
+ const warnBox=$('#bandWarningBox');
+ if(warnBox){if(result.bandWarning){warnBox.hidden=false;warnBox.textContent=result.bandWarning;}else{warnBox.hidden=true;warnBox.textContent='';}}
  $('#scenarioRows').replaceChildren(...result.rows.map((row)=>{
   const tr=document.createElement('tr');tr.dataset.window=row.key;
   const moveText=!Number.isFinite(row.target)?'历史不足':row.move===0?`保持 ${pct(result.current*100)}（差在死区内）`:`${row.move>0?'增加':'减少'} ${pp(row.move)} → ${pct(row.after*100)}`;
@@ -78,7 +80,7 @@ function renderWindows(a){
   add('expo',`单窗口参考仓位 ${pct(Number.isFinite(w.exposure)?w.exposure*100:null)}`);
   add('budget-example',Number.isFinite(w.exposure)?`若资金池10万元，参考持仓 ${num(w.exposure*100000,0)} 元`:'无法计算参考持仓');
   const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='这个仓位怎么算';details.append(summary);
-  const p=document.createElement('p');p.textContent=Number.isFinite(w.pe_cap)&&Number.isFinite(w.erp_cap)?`PE阶梯允许 ${pct(w.pe_cap*100)}，ERP闸门允许 ${pct(w.erp_cap*100)}；取较小值，再向下落到12.5个百分点的档位，得到 ${pct(w.exposure*100)}。`:'先按PE历史位置确定仓位上限，再经过股债利差闸门，并向下取整至12.5个百分点档位。';details.append(p);div.append(details);
+  const p=document.createElement('p');p.textContent=Number.isFinite(w.pe_cap)&&Number.isFinite(w.erp_cap)?`PE阶梯（含±2.0分位回滞）允许 ${pct(w.pe_cap*100)}，ERP闸门（含±2.0分位回滞）允许 ${pct(w.erp_cap*100)}；取较小值，再向下落到12.5个百分点的档位，得到 ${pct(w.exposure*100)}。`:'先按PE历史位置确定仓位上限，再经过股债利差闸门（均含±2.0分位回滞），并向下取整至12.5个百分点档位。';details.append(p);div.append(details);
   return div;
  }));
 }

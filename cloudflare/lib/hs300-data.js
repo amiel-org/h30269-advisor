@@ -6,8 +6,8 @@
 //   * eastmoney       RPTA_WEB_TREASURYYIELD -> 10Y China government yield
 //
 // The bond series is forward-filled from PAST observations only.
-import { DEFAULT_CONFIG, buildSignals, metrics, percentileOfHistory, runBacktest } from "./hs300-model.js";
-import { conditionalLevels, confirmationState, dashboardQuality, signalDetail, valuationTable } from "./hs300-decision.js";
+import { DEFAULT_CONFIG, buildSignalDetail, metrics, percentileOfHistory, runBacktest } from "./hs300-model.js";
+import { conditionalLevels, confirmationState, dashboardQuality, valuationTable } from "./hs300-decision.js";
 import { buildPriceChart, liveAnalysis, quoteQuality } from "./hs300-live.js";
 
 const CSI_PERF = "https://www.csindex.com.cn/csindex-home/perf/index-perf";
@@ -213,14 +213,17 @@ export function alignSeries(priceRows, trRows, bond) {
 }
 
 export function compact(d) { return d.toISOString().slice(0, 10).replaceAll("-", ""); }
-export const SETTLED_KEY = "hs300:settled:v4";
+export const SETTLED_KEY = "hs300:settled:v5";
+const LEGACY_SETTLED_V4 = "hs300:settled:v4";
 const LEGACY_SETTLED_KEY = "hs300:settled:v3";
 const HISTORY_CHECK_MS = 5 * 60000;
 
 function chinaNow(now) { return new Date(now.getTime() + 8 * 3600000); }
 async function readSettled(env, now) {
   try {
-    const raw = await env?.H30269_KV?.get(SETTLED_KEY) || await env?.H30269_KV?.get(LEGACY_SETTLED_KEY);
+    const raw = await env?.H30269_KV?.get(SETTLED_KEY)
+      || await env?.H30269_KV?.get(LEGACY_SETTLED_V4)
+      || await env?.H30269_KV?.get(LEGACY_SETTLED_KEY);
     const cached = raw ? JSON.parse(raw) : null;
     const age = now.getTime() - Date.parse(cached?.cached_at);
     // Validated historical observations do not expire at 15:10 or overnight.
@@ -261,12 +264,23 @@ export async function buildHs300Result(env = null, { now = new Date(), signal, f
         fetchRecentBond(signal),
       ]);
       const complete = (r) => r.date < end || (r.date === end && cn.getUTCHours() * 60 + cn.getUTCMinutes() >= 15 * 60 + 10);
+      // Use real dated bond observations stored in bond_recent; only fall back
+      // to settled.bond_date -> bond_last when upgrading a legacy cache entry.
       const bond = {};
-      for (let i = 0; i < settled.series.dates.length; i += 1) {
-        const d = settled.series.dates[i];
-        if (d >= start) bond[d] = 100 / settled.series.pe[i] - settled.series.spread[i];
+      if (settled.bond_recent && typeof settled.bond_recent === "object") {
+        for (const [d, value] of Object.entries(settled.bond_recent)) {
+          if (validDate(d) && value > 0) bond[d] = Number(value);
+        }
+      } else if (validDate(settled.bond_date) && settled.bond_last > 0) {
+        const legacyCutoff = compact(new Date(dayStamp(start) - 14 * 86400000));
+        for (let i = 0; i < settled.series.dates.length; i += 1) {
+          const d = settled.series.dates[i];
+          if (d >= legacyCutoff) bond[d] = +(100 / settled.series.pe[i] - settled.series.spread[i]).toFixed(6);
+        }
       }
       for (const [d, value] of Object.entries(latestBond)) if (d <= end) bond[d] = value;
+      const recentCutoff = compact(new Date(dayStamp(end) - 60 * 86400000));
+      const bondRecent = Object.fromEntries(Object.entries(bond).filter(([d]) => d >= recentCutoff));
       const priceRows = prices.filter((r) => complete(r) && r.date >= start), trRows = totals.filter(complete);
       const recent = alignSeries(priceRows, trRows, bond);
       if (!recent.dates.length || recent.dates.at(-1) < settled.series.dates.at(-1)) {
@@ -283,12 +297,12 @@ export async function buildHs300Result(env = null, { now = new Date(), signal, f
         series[field] = [...settled.series[field].slice(0, cut < 0 ? undefined : cut), ...recent[field]];
       }
       const last = series.dates.at(-1);
-      const bondDate = Object.keys(latestBond).sort().filter((d) => d <= last).at(-1);
+      const bondDate = Object.keys(bond).sort().filter((d) => d <= last).at(-1);
       if (!bondDate) throw new Error("缺少最近日线对应的国债收益率");
       settled = { ...settled, series, settled_price: priceRows.find((r) => r.date === last)?.close,
-        bond_last: latestBond[bondDate], bond_date: bondDate, checked_at: now.toISOString(),
+        bond_last: bond[bondDate], bond_date: bondDate, bond_recent: bondRecent, checked_at: now.toISOString(),
         cached_at: now.toISOString(), last_error: null, chart_checked_at: now.toISOString(),
-        latest_bond: (() => { const d = Object.keys(latestBond).sort().filter((d) => d <= end).at(-1); return d ? { as_of: d, value: latestBond[d] } : null; })(),
+        latest_bond: (() => { const d = Object.keys(bond).sort().filter((d) => d <= end).at(-1); return d ? { as_of: d, value: bond[d] } : null; })(),
         price_rows: [...new Map([...(settled.price_rows || []), ...prices.filter(complete)].map((r) => [r.date, r])).values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-900) };
       await writeSettled(env, settled);
       historySource = "incremental";
@@ -314,8 +328,10 @@ export async function buildHs300Result(env = null, { now = new Date(), signal, f
     if (series.dates.length < 750) throw new Error(`历史不足: ${series.dates.length}`);
     const last = series.dates.at(-1);
     const bondDate = Object.keys(bond).sort().filter((d) => d <= last).at(-1);
+    const recentCutoff = compact(new Date(dayStamp(end) - 60 * 86400000));
+    const bondRecent = Object.fromEntries(Object.entries(bond).filter(([d]) => d >= recentCutoff));
     settled = { series, settled_price: priceRows.find((r) => r.date === last)?.close,
-      bond_last: bond[bondDate], bond_date: bondDate, cached_at: now.toISOString(), checked_at: now.toISOString(), last_error: null };
+      bond_last: bond[bondDate], bond_date: bondDate, bond_recent: bondRecent, cached_at: now.toISOString(), checked_at: now.toISOString(), last_error: null };
     settled.price_rows = priceRows.slice(-900);
     const newestBond = Object.keys(bond).sort().at(-1);
     settled.latest_bond = { as_of: newestBond, value: bond[newestBond] };
@@ -329,10 +345,12 @@ export async function buildHs300Result(env = null, { now = new Date(), signal, f
 export function resultFromSettled(settled, quote = null, { now = new Date(), historySource = "cache", historyError = null } = {}) {
   const series = settled.series;
   const last = series.dates.length - 1;
-  const signals = buildSignals(series);
+  const details = buildSignalDetail(series);
+  const signals = details.map((row) => (row ? row.consensus_exposure : null));
+  const rfAnnual = DEFAULT_CONFIG.execution.risk_free_annual || 0;
   const run = runBacktest(series, undefined, signals, 1);
-  const m = metrics(run.curve);
-  const cur = signalDetail(series);
+  const m = metrics(run.curve, 252, rfAnnual);
+  const cur = details[last];
   const windows = {};
   for (const [key, w] of Object.entries(cur.windows)) {
     windows[key] = { label: w.label, pe_percentile: w.pePercentile, erp_percentile: w.erpPercentile, exposure: w.exposure };
@@ -348,10 +366,8 @@ export function resultFromSettled(settled, quote = null, { now = new Date(), his
   const first = series.dates.indexOf(m.start);
   const buyHold = series.dates.slice(first).map((d, i) => [d, series.tr[first + i] / series.tr[first]]);
   const table = valuationTable(series, settled.settled_price);
-  const conditional = quality.analysis_available ? conditionalLevels(series, settled.settled_price, settled.bond_last) : null;
+  const conditional = quality.analysis_available ? conditionalLevels(series, settled.settled_price, settled.bond_last, DEFAULT_CONFIG, { detail: cur, prevStates: cur.next_state }) : null;
   const average = run.exposures.reduce((a, b) => a + b, 0) / run.exposures.length;
-  // A fixed INITIAL allocation drifts over time; it is a budget comparison,
-  // not a volatility-matched benchmark (average exposure is known ex post).
   const matched = buyHold.map(([d, nav]) => [d, 1 - average + average * nav]);
   const result = {
     model_version: DEFAULT_CONFIG.version,
@@ -367,28 +383,27 @@ export function resultFromSettled(settled, quote = null, { now = new Date(), his
     erp: +series.spread[last].toFixed(4),
     erp_percentile: +percentileOfHistory(series.spread.slice(0, -1), series.spread[last]).toFixed(2),
     bond: { value: settled.bond_last, as_of: settled.bond_date }, quality,
-    windows, consensus: { agreed: cur.agreed, exposure: cur.consensus_exposure, vote: cur.vote, span: cur.span },
+    windows, consensus: { agreed: cur.agreed, exposure: cur.consensus_exposure, vote: cur.vote, span: cur.span, min_exposure: cur.min_exposure, max_exposure: cur.max_exposure },
     target_exposure: cur.consensus_exposure, execution: confirmationState(signals),
     ...table, conditional_levels: conditional,
     backtest: { cagr_calendar_pct: m.cagrCalendarPct, max_drawdown_pct: m.maxDrawdownPct,
-      sharpe: m.sharpe, trades: run.steps.length, avg_exposure: +average.toFixed(4),
-      start: m.start, end: m.end, buy_hold: metrics(buyHold), budget_comparison: metrics(matched) },
+      sharpe: m.sharpe, sharpe_zero_rf: m.sharpeZeroRf, trades: run.steps.length, avg_exposure: +average.toFixed(4),
+      start: m.start, end: m.end, buy_hold: metrics(buyHold, 252, rfAnnual), budget_comparison: metrics(matched, 252, rfAnnual) },
     chart: { dates: series.dates.slice(-500), price: series.tr.slice(-500), pe: series.pe.slice(-500), exposure: run.exposures.slice(-500) },
     disclosures: [
       "仓位以沪深300策略专用资金池为分母，不是家庭总资产；本页面未读取你的真实持仓。",
-      "正式信号仅使用已发布的收盘数据，盘中报价不参与确认。买入1次收盘确认、卖出2次连续收盘确认，次一交易日收盘执行，每次最多调整12.5个百分点，5个百分点以内不调仓。",
+      "当前分析根据最新点位即时估算PE、ERP与三窗口目标（含±2.0分位回滞缓冲）；它是盘中辅助判断，未完成的当日日线不会计作收盘确认。历史回测仍使用收盘信号、次日收盘成交，不能作为盘中交易业绩。",
       "三窗口均有足够历史且目标一致才给目标仓位；分歧仅表示模型不调仓，不能据此断言市场没有投资优势。",
-      "研究参数在同一历史样本中选择，没有干净样本外验证，也没有经核实的实盘业绩。历史回测不代表未来收益。",
-      "回测使用全收益指数，交易单边费用5bp，现金收益0；未扣基金管理费、跟踪误差和额外冲击成本。夏普按252日、无风险收益0估算。",
+      "研究参数在同一历史样本中检验，没有干净独立盲测期或经核实的实盘业绩。历史回测不代表未来收益。",
+      "v2.5 回测使用 H00300 全收益指数，按实际日历天数扣除 ETF 年化管理托管费 0.20%、计入闲置现金年化收益 1.8%、交易单边费用 5bp；夏普比率按扣除 1.8% 无风险利率的超额收益估算。",
       "等初始预算比较中的比例来自事后平均仓位，不是波动率匹配，也不是可提前获得的最优比例。最大回撤不代表未来亏损上限。",
     ],
   };
-  result.analysis = liveAnalysis(settled, quote, now);
+  result.analysis = liveAnalysis(settled, quote, now, { stateAtEnd: cur.next_state });
   if (historyError) {
     result.analysis.quality.can_decide = false;
     result.analysis.quality.reason = "历史基准本次核验失败，当前点位测算保留供参考";
   }
   result.price_chart = buildPriceChart(settled.price_rows || [], quote, now);
-  result.disclosures[1] = "当前分析根据最新点位即时估算PE、ERP与三窗口目标；它是盘中辅助判断，未完成的当日日线不会计作收盘确认。历史回测仍使用收盘信号、次日收盘成交，不能作为盘中交易业绩。";
   return result;
 }

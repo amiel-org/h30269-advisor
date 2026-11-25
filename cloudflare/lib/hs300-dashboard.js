@@ -10,10 +10,10 @@ import { quoteQuality } from "./hs300-live.js";
 // Cache the full payload briefly. Daily history has its own longer-lived cache;
 // a manual refresh obtains a new quote for the current analysis layer.
 const CACHE_MS = 25 * 1000;
-export const DASH_KEY = "hs300:dashboard:v5";
+export const DASH_KEY = "hs300:dashboard:v6";
 const HIST_KEY = "hs300:history";
 const inFlight = new WeakMap();
-export const SERVICE_VERSION = "v2.8.0";
+export const SERVICE_VERSION = "v2.9.0";
 
 function readableError(error) {
   return error?.name === "AbortError" || /abort|timeout/i.test(error?.message || "")

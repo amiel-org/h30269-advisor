@@ -1,12 +1,14 @@
 {
-  "model_version": "V3.1-auto-1.0",
+  "model_version": "V3.2-auto-1.0",
   "index_code": "H30269",
+  "total_return_code": "H20269",
   "benchmark_code": "000985",
-  "history_calendar_days": 2600,
+  "benchmark_total_return_code": "H00985",
+  "history_calendar_days": 5000,
   "use_intraday": true,
   "cache_max_age_days": 5,
-  "max_market_age_days": 5,
-  "max_fundamental_age_days": 45,
+  "max_market_age_days": 12,
+  "max_fundamental_age_days": 14,
   "thresholds": {
     "relative": {
       "strong_buy_max": -8.0,
@@ -21,8 +23,13 @@
       "strong_multiple_min": 2.5,
       "support_spread_min": 2.0,
       "support_multiple_min": 2.0,
-      "neutral_spread_min": 1.0,
-      "neutral_multiple_min": 1.5
+      "neutral_spread_min": 1.2,
+      "neutral_multiple_min": 1.8
+    },
+    "valuation_gate": {
+      "min_observations": 500,
+      "high_pe_percentile": 80.0,
+      "core_review_pe_percentile": 75.0
     },
     "sell_confirmation": {
       "target_40d_return_min": 5.0,
@@ -33,6 +40,7 @@
   "beta": {
     "primary_window": "5y",
     "fallback": 0.4,
+    "shrinkage_r2_ref": 0.15,
     "windows": {
       "2y": {
         "trading_days": 484,
@@ -54,25 +62,17 @@
   },
   "execution": {
     "position_denominator": "strategy_budget",
-    "buy_tranche_pct": 20,
+    "buy_tranche_pct": 12,
+    "add_tranche_pct": 16,
+    "strong_buy_tranche_pct": 20,
     "buy_tranche_unit": "budget_percentage_points",
-    "reduce_pct": 5,
-    "reduce_unit": "current_holdings_percent",
+    "reduce_pct": 10,
+    "reduce_unit": "budget_percentage_points",
     "core_cap_pct": 70,
+    "core_floor_pct": 45,
     "tactical_cap_pct": 30,
     "heavy_position_pct": 80,
+    "cooldown_trading_days": 5,
     "intraday_reduce_enabled": true
-  },
-  "fallbacks": {
-    "dividend_yield": {
-      "value_pct": 5.13,
-      "as_of": "2026-06-24",
-      "source_url": "local://V2.2-public-proxy"
-    },
-    "bond_10y": {
-      "value_pct": 1.7454,
-      "as_of": "2026-06-25",
-      "source_url": "local://V2.2-public-proxy"
-    }
   }
 }

@@ -1,5 +1,6 @@
 // Pure arithmetic shared by the browser calculator and regression checks.
-// Scenario rows explain each window; they never override consensus.
+// Scenario rows explain each window; they never override consensus, while
+// surfacing out-of-band overweight/underweight warnings when windows diverge.
 export function calculatePosition(data, positionText, budgetText = '', options = {}) {
   const position = String(positionText ?? '').trim();
   const budget = String(budgetText ?? '').trim();
@@ -38,6 +39,9 @@ export function calculatePosition(data, positionText, budgetText = '', options =
   const keys = ['full', '10y', '5y'];
   const rows = keys.map((key) => ({ key, ...plan(analysis.windows?.[key]?.exposure) }));
   const values = keys.map((key) => analysis.windows?.[key]?.exposure);
+  const validValues = values.filter(Number.isFinite);
+  const windowMin = validValues.length === keys.length ? Math.min(...validValues) : null;
+  const windowMax = validValues.length === keys.length ? Math.max(...validValues) : null;
   const consensus = analysis.consensus;
   const agreed = Boolean(consensus?.agreed && Number.isFinite(consensus.exposure) &&
     values.every((v) => Number.isFinite(v) && Math.abs(v - consensus.exposure) < 1e-9));
@@ -49,8 +53,18 @@ export function calculatePosition(data, positionText, budgetText = '', options =
   const targetMatches = !hasConfirmedTarget || (Number.isFinite(execution.target) && agreed && Math.abs(execution.target - overall.target) < 1e-9);
   const directionConfirmed = direction === 'buy' ? execution.buy_confirmed === true
     : direction === 'sell' ? execution.sell_confirmed === true : true;
+
+  let bandWarning = null;
+  if (!agreed && windowMin !== null && windowMax !== null) {
+    if (current > windowMax + deadband + 1e-9) {
+      bandWarning = `注意：三窗口参考上限最高仅 ${(windowMax * 100).toFixed(1)}%，你的现仓明显高于全部窗口区间`;
+    } else if (current < windowMin - deadband - 1e-9) {
+      bandWarning = `提示：三窗口参考下限最低为 ${(windowMin * 100).toFixed(1)}%，你的现仓低于全部窗口区间`;
+    }
+  }
+
   const reasons = [];
-  if (!agreed) reasons.push('三个窗口没有统一目标');
+  if (!agreed) reasons.push(bandWarning ? `三个窗口没有统一目标（${bandWarning}）` : '三个窗口没有统一目标');
   if (agreed && !targetMatches) reasons.push('盘中目标与已确认收盘目标不同，只能预演');
   if (agreed && direction !== 'hold' && !directionConfirmed) {
     reasons.push(direction === 'sell'
@@ -60,6 +74,7 @@ export function calculatePosition(data, positionText, budgetText = '', options =
   if (!analysis.quality?.available) reasons.push('行情基准暂不可用');
   if (!analysis.quality?.can_decide) reasons.push(mode === 'settled_review' ? '正式收盘复核尚未形成可执行信号' : '当前报价不可用于执行');
   return { valid: true, current, capital, agreed, overall, rows,
+    windowMin, windowMax, bandWarning,
     holdings: capital === null ? null : capital * current,
     cash: capital === null ? null : capital * (1 - current),
     canAct: Boolean(agreed && targetMatches && directionConfirmed && analysis.quality?.can_decide && analysis.quality?.available),

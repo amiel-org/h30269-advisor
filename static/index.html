@@ -4,14 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>H30269 &amp; HS300 双决策台</title>
+  <title>H30269 &amp; HS300 双决策台 · 红利低波</title>
   <link rel="stylesheet" href="/static/app.css">
-<style>
-  .hs-tabs { display:flex; gap:8px; margin-left:12px; }
-  .hs-tabs a { text-decoration:none; padding:6px 14px; border-radius:8px; font-size:14px;
-    color:#4b5563; border:1px solid #e5e7eb; background:#fff; }
-  .hs-tabs a.active { background:#111827; color:#fff; border-color:#111827; }
-</style>
 </head>
 <body>
   <div class="app-shell">
@@ -20,21 +14,21 @@
         <span class="brand-mark" aria-hidden="true"><i data-lucide="chart-candlestick"></i></span>
         <div class="brand-copy">
           <strong>H30269 &amp; HS300</strong>
-          <span>红利低波 · 决策台 V3.1</span>
+          <span>红利低波 · 决策台 V3.2</span>
         </div>
       </div>
-
-      <nav class="tabs" aria-label="主导航">
-        <button class="tab active" data-tab="overview">决策台</button>
-        <button class="tab" data-tab="history">历史记录</button>
-      </nav>
 
       <nav class="hs-tabs" aria-label="决策台切换">
         <a href="/" class="active">红利低波</a>
         <a href="/hs300">沪深300</a>
+        <a href="/portfolio">双资产总池</a>
       </nav>
 
       <div class="top-actions">
+        <nav class="sub-tabs" aria-label="视图切换">
+          <button class="tab active" data-tab="overview">实时</button>
+          <button class="tab" data-tab="history">留痕</button>
+        </nav>
         <div class="market-state">
           <span id="marketDot" class="state-dot"></span>
           <span id="asOfText">读取中</span>
@@ -159,7 +153,7 @@
               <label>其中战术仓 <span><input id="h30269Tactical" type="number" min="0" max="100" step="0.1" placeholder="10" inputmode="decimal">%</span></label>
               <label>策略资金池 <span><input id="h30269Budget" type="number" min="0.01" step="any" placeholder="可不填" inputmode="decimal">元</span></label>
             </div>
-            <small>核心仓＝总仓位－战术仓；核心/战术上限70%/30%，以各自资金池为分母。</small>
+            <small>核心仓＝总仓位－战术仓；核心/战术上限70%/30%，总仓重仓线80%，核心降档底仓45%。</small>
           </div>
 
           <div class="position-action">
@@ -185,13 +179,13 @@
         </aside>
       </section>
 
-      <section class="decision-chains" aria-label="V3.1执行链">
+      <section class="decision-chains" aria-label="V3.2执行链">
         <div class="chain-lane buy-lane">
-          <div class="chain-title"><span>加仓链</span><strong>多窗口低估 → 股债支撑 → 分批执行</strong></div>
+          <div class="chain-title"><span>加仓链</span><strong>全收益多窗口低估 → 股债与PE分位闸门 → 分档执行</strong></div>
           <div id="buyChain" class="chain-flow"></div>
         </div>
         <div class="chain-lane reduce-lane">
-          <div class="chain-title"><span>减仓链</span><strong>Beta过热 → 自身上涨 → 年线确认 → 收盘确认</strong></div>
+          <div class="chain-title"><span>减仓链</span><strong>全收益Beta过热 → 自身上涨 → 年线确认 → 连续收盘确认</strong></div>
           <div id="reduceChain" class="chain-flow"></div>
         </div>
       </section>
@@ -229,9 +223,9 @@
           </div>
           <div class="relative-chart-wrap"><canvas id="relativeChart"></canvas></div>
           <div class="threshold-row">
-            <span><i class="threshold-dot buy"></i>≤ -1% 且多窗口一致才买</span>
+            <span><i class="threshold-dot buy"></i>≤ -1% 全收益多窗口一致 + PE分位&lt;80%</span>
             <span><i class="threshold-dot watch"></i>5%~7% 只暂停新增</span>
-            <span><i class="threshold-dot confirm"></i>≥ 7% 还需自身涨幅、年线与2日收盘确认</span>
+            <span><i class="threshold-dot confirm"></i>≥ 7% 还需自身涨幅、年线与2日完整收盘确认</span>
           </div>
         </section>
 
@@ -252,6 +246,7 @@
           </div>
           <div class="valuation-meta">
             <span id="equityBondMultiple">--</span>
+            <span id="peValuationText">--</span>
             <span id="generatedAtText">--</span>
           </div>
           <div id="sourceRows" class="source-list"></div>

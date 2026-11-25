@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>双资产总资金池 · 组合配置台 v1.0</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/hs300.css">
+  <link rel="stylesheet" href="/static/portfolio.css">
+</head>
+<body class="hs-desk pf-desk">
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"><i data-lucide="layers"></i></span>
+        <div class="brand-copy">
+          <strong>H30269 &amp; HS300</strong>
+          <span>双资产总资金池 · 配置台 v1.0</span>
+        </div>
+      </div>
+      <nav class="hs-tabs" aria-label="决策台切换">
+        <a href="/">红利低波</a>
+        <a href="/hs300">沪深300</a>
+        <a href="/portfolio" class="active">双资产总池</a>
+      </nav>
+      <div class="top-actions">
+        <span id="asOfText" role="status">读取中</span>
+        <button id="refreshButton" class="hs-btn">刷新双引擎</button>
+      </div>
+    </header>
+
+    <main class="pf-main">
+      <div id="errorBanner" class="hs-error" role="alert" hidden></div>
+
+      <section class="decision-bar" aria-label="总资金池核心摘要">
+        <div class="decision-bar-item primary">
+          <i data-lucide="compass"></i>
+          <div><span>当前组合阶段</span><strong id="topRegime">读取中</strong></div>
+        </div>
+        <div class="decision-bar-item">
+          <div><span>模型参考总权益 / 现金</span><strong id="topTotalEq">--</strong></div>
+        </div>
+        <div class="decision-bar-item">
+          <div><span>沪深300有效预算</span><strong id="topHsBudget">--</strong></div>
+        </div>
+        <div class="decision-bar-item">
+          <div><span>红利低波有效预算</span><strong id="topDivBudget">--</strong></div>
+        </div>
+        <div class="decision-bar-item">
+          <div><span>总池硬上限 / 现金底线</span><strong>90% / ≥10%</strong></div>
+        </div>
+      </section>
+
+      <div id="regimeBanner" class="pf-regime-banner">
+        <span id="regimeSummary">正在对齐沪深300 v2.5 与红利低波 V3.2 实时信号…</span>
+        <small id="regimeMeta">--</small>
+      </div>
+
+      <section class="pf-stage">
+        <div class="pf-workbench">
+          <div class="pf-head">
+            <div>
+              <span class="section-label">家庭权益总资金池 = 沪深300 + 红利低波 + 预留现金（100%分母）</span>
+              <h1>我的总资金池仓位测算</h1>
+            </div>
+            <span id="planBadge" class="pf-pill">等待填写</span>
+          </div>
+
+          <div class="pf-presets" aria-label="快速情景预设">
+            <span>快捷试算：</span>
+            <button type="button" class="pf-preset-btn" data-preset="25,35">均衡示例 25% / 35%</button>
+            <button type="button" class="pf-preset-btn" data-preset="0,0">纯现金起步 0% / 0%</button>
+            <button type="button" class="pf-preset-btn" data-preset="45,45">高仓体检 45% / 45%</button>
+            <button type="button" class="pf-preset-btn ghost" data-preset=",">清空</button>
+          </div>
+
+          <div class="pf-inputs">
+            <label class="pf-field">
+              <span><strong>沪深300现仓</strong><em>占总资金池</em></span>
+              <div class="pf-input-box">
+                <input id="pfHsInput" type="number" min="0" max="100" step="0.5" placeholder="25" inputmode="decimal">
+                <span>%</span>
+              </div>
+            </label>
+            <label class="pf-field">
+              <span><strong>红利低波现仓</strong><em>占总资金池</em></span>
+              <div class="pf-input-box">
+                <input id="pfDivInput" type="number" min="0" max="100" step="0.5" placeholder="35" inputmode="decimal">
+                <span>%</span>
+              </div>
+            </label>
+            <label class="pf-field">
+              <span><strong>总权益资金池</strong><em>可留空</em></span>
+              <div class="pf-input-box">
+                <input id="pfBudgetInput" type="number" min="1" step="any" placeholder="500000" inputmode="decimal">
+                <span>元</span>
+              </div>
+            </label>
+          </div>
+
+          <p id="calcMessage" class="pf-muted">填入两项实际持仓占比后，自动计算剩余现金、平滑补位预算、5% 死区过滤后的单步调仓方案与跨资产资金流向；所有输入仅保存在本机浏览器。</p>
+
+          <div id="calcResults" hidden>
+            <div class="pf-kpi-strip">
+              <div>
+                <span>当前总权益 / 现金</span>
+                <strong id="kpiCurEq">--</strong>
+                <small id="kpiCurAmt">未填写资金池金额</small>
+              </div>
+              <div>
+                <span>建议调整后总权益 / 现金</span>
+                <strong id="kpiAfterEq">--</strong>
+                <small id="kpiAfterAmt">--</small>
+              </div>
+              <div>
+                <span>本次净现金变动</span>
+                <strong id="kpiNetMove">--</strong>
+                <small id="kpiCrossNote">--</small>
+              </div>
+            </div>
+
+            <div class="pf-bars">
+              <div class="pf-bar-row">
+                <div class="pf-bar-meta"><span>当前仓位结构</span><strong id="curMixText">--</strong></div>
+                <div class="pf-stack-wrap">
+                  <div class="pf-stack">
+                    <div id="curBarHs" class="pf-seg-hs" style="width:0%"></div>
+                    <div id="curBarDiv" class="pf-seg-div" style="width:0%"></div>
+                    <div id="curBarCash" class="pf-seg-cash" style="width:100%"></div>
+                  </div>
+                  <i class="pf-cap-marker" title="90% 总权益硬封顶线"></i>
+                </div>
+              </div>
+              <div class="pf-bar-row">
+                <div class="pf-bar-meta"><span>本次建议后结构</span><strong id="afterMixText">--</strong></div>
+                <div class="pf-stack-wrap">
+                  <div class="pf-stack">
+                    <div id="afterBarHs" class="pf-seg-hs" style="width:0%"></div>
+                    <div id="afterBarDiv" class="pf-seg-div" style="width:0%"></div>
+                    <div id="afterBarCash" class="pf-seg-cash" style="width:100%"></div>
+                  </div>
+                  <i class="pf-cap-marker" title="90% 总权益硬封顶线"></i>
+                </div>
+              </div>
+              <div class="pf-legend">
+                <span><i style="background:#386fd6"></i>沪深300（宽基进攻）</span>
+                <span><i style="background:#e19923"></i>红利低波（价值压舱）</span>
+                <span><i style="background:#8c989e"></i>权益预留现金</span>
+                <span class="cap-note">红线 = 90% 总权益硬封顶（保留 ≥10% 现金底线）</span>
+              </div>
+            </div>
+
+            <div id="fundingBox" class="pf-funding">--</div>
+
+            <div class="pf-table-wrap">
+              <table class="pf-table">
+                <thead>
+                  <tr>
+                    <th>资产分舱</th>
+                    <th>当前占总池</th>
+                    <th>有效预算上限</th>
+                    <th>本次建议动作</th>
+                    <th>调整后占总池</th>
+                    <th>对应金额</th>
+                  </tr>
+                </thead>
+                <tbody id="planRows"></tbody>
+              </table>
+            </div>
+
+            <p id="sleeveDetailNotes" class="pf-muted"></p>
+          </div>
+        </div>
+
+        <aside class="pf-rail" aria-label="双引擎实时状态">
+          <div class="pf-rail-title">
+            <span>双引擎协同遥测</span>
+            <strong>50 / 50 基础 + 平滑补位</strong>
+          </div>
+
+          <div class="pf-engine-card">
+            <div class="pf-engine-top">
+              <strong>01 · 沪深300（v2.5）</strong>
+              <a href="/hs300">进入详情 →</a>
+            </div>
+            <div class="pf-kv-grid">
+              <div><span>点位 / PE分位</span><strong id="hsMetricPe">--</strong></div>
+              <div><span>三窗口共识目标</span><strong id="hsMetricTarget">--</strong></div>
+              <div><span>ERP / 历史分位</span><strong id="hsMetricErp">--</strong></div>
+              <div><span>数据与窗口状态</span><strong id="hsMetricStatus">--</strong></div>
+            </div>
+            <div class="pf-meter-wrap">
+              <div class="pf-meter-head"><span>承接补位系数（PE≤45%满额）</span><strong id="hsMetricFactor">--</strong></div>
+              <div class="pf-meter"><i id="hsFactorBar" style="width:0%"></i></div>
+            </div>
+            <p id="hsSleeveNote" class="pf-sleeve-reason">--</p>
+          </div>
+
+          <div class="pf-engine-card">
+            <div class="pf-engine-top">
+              <strong>02 · 红利低波（V3.2）</strong>
+              <a href="/">进入详情 →</a>
+            </div>
+            <div class="pf-kv-grid">
+              <div><span>全收益Beta调整差</span><strong id="divMetricSpread">--</strong></div>
+              <div><span>当前规则结论</span><strong id="divMetricDecision">--</strong></div>
+              <div><span>PE分位 / 股债支撑</span><strong id="divMetricVal">--</strong></div>
+              <div><span>股息率 / 10年国债</span><strong id="divMetricYield">--</strong></div>
+            </div>
+            <div class="pf-meter-wrap">
+              <div class="pf-meter-head"><span>承接补位系数（PE≤70%满额）</span><strong id="divMetricFactor">--</strong></div>
+              <div class="pf-meter"><i id="divFactorBar" style="width:0%"></i></div>
+            </div>
+            <p id="divSleeveNote" class="pf-sleeve-reason">--</p>
+          </div>
+
+          <div class="pf-guardrails">
+            <strong>核心纪律与防误杀护栏</strong>
+            单资产上限 65%（300）/ 70%（红利），总权益硬封顶 90%。仅当估值偏离超过 5% 死区才动仓，单步最多 10 个百分点；估值温和抬升仅收窄新增补位，不强制砍掉已有持仓。
+          </div>
+        </aside>
+      </section>
+
+      <section class="pf-research">
+        <div class="pf-head">
+          <div>
+            <span class="section-label">2017-12-29 至 2026-10-13 同口径历史检验 · 收盘出信号次日收盘成交</span>
+            <h2>统一总资金池实证回测对照</h2>
+          </div>
+        </div>
+        <div id="corrStrip" class="pf-corr-strip"></div>
+        <div class="pf-table-wrap">
+          <table class="pf-table">
+            <thead>
+              <tr>
+                <th>组合方案（含年化 1.8% 现金收益、扣 0.20% ETF 费率与单边 5bp 佣金）</th>
+                <th>全样本年化</th>
+                <th>最大回撤</th>
+                <th>超额夏普</th>
+                <th>卡玛比率</th>
+                <th>2022前 / 2022后年化</th>
+                <th>均仓（300 / 红利 / 总）</th>
+                <th>调仓次数</th>
+              </tr>
+            </thead>
+            <tbody id="backtestRows"></tbody>
+          </table>
+        </div>
+        <details>
+          <summary>展开查看：补位公式、防误杀保护与模型适用边界</summary>
+          <p id="disclosuresText" class="pf-muted"></p>
+        </details>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/vendor/lucide.min.js"></script>
+  <script type="module" src="/static/portfolio.js"></script>
+</body>
+</html>

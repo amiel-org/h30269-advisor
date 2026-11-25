@@ -3,8 +3,10 @@ import test from "node:test";
 
 import {
   bondSupport,
+  dataQuality,
   estimateBeta,
   evaluateRules,
+  impliedDividendYield,
   parseBond10y,
   relativeZone,
 } from "./worker.js";
@@ -88,4 +90,77 @@ test("relative overheat without absolute gain cannot sell", () => {
   }), { blockers: [], warnings: [] });
   assert.equal(result.action_code, "overheat_protected");
   assert.equal(result.execution.pct, 0);
+});
+
+test("V3.2 PE valuation gate blocks high-percentile regular buys while preserving extreme strong_buy", () => {
+  const blocked = evaluateRules(metrics({
+    relative_zone: "买入",
+    beta_adjusted_spread_pct: -2.2,
+    pe: 7.9,
+    pe_percentile: 81.5,
+    beta_consensus: { consistent: true, robust_buy: true, robust_overheat: false, status: "窗口一致" },
+  }), { blockers: [], warnings: [] });
+  assert.equal(blocked.action_code, "valuation_high_watch");
+  assert.equal(blocked.execution.pct, 0);
+
+  const normalBuy = evaluateRules(metrics({
+    relative_zone: "买入",
+    beta_adjusted_spread_pct: -2.2,
+    pe: 6.5,
+    pe_percentile: 45.0,
+    beta_consensus: { consistent: true, robust_buy: true, robust_overheat: false, status: "窗口一致" },
+  }), { blockers: [], warnings: [] });
+  assert.equal(normalBuy.action_code, "buy_tranche");
+  assert.equal(normalBuy.execution.pct, 12);
+
+  const addBuy = evaluateRules(metrics({
+    relative_zone: "加仓",
+    beta_adjusted_spread_pct: -5.5,
+    pe: 6.5,
+    pe_percentile: 45.0,
+    beta_consensus: { consistent: true, robust_buy: true, robust_overheat: false, status: "窗口一致" },
+  }), { blockers: [], warnings: [] });
+  assert.equal(addBuy.execution.pct, 16);
+
+  const strongBuy = evaluateRules(metrics({
+    relative_zone: "强买",
+    beta_adjusted_spread_pct: -8.5,
+    pe: 7.9,
+    pe_percentile: 85.0,
+    beta_consensus: { consistent: true, robust_buy: true, robust_overheat: false, status: "窗口一致" },
+  }), { blockers: [], warnings: [] });
+  assert.equal(strongBuy.action_code, "buy_tranche");
+  assert.equal(strongBuy.execution.pct, 20);
+});
+
+test("V3.2 dataQuality blocks missing, fallback or expired fundamentals", () => {
+  const now = new Date("2026-11-25T06:00:00Z");
+  const q = dataQuality(
+    { trade_date: "2026-11-24", beta_source: "rolling-full", beta_consensus: { consistent: true } },
+    { value: null, as_of: null, status: "missing" },
+    { value: 1.80, as_of: "2026-06-25", status: "cache" },
+    [],
+    now,
+  );
+  assert.equal(q.confidence, "低");
+  assert.equal(q.blockers.length, 2);
+});
+
+test("V3.2 impliedDividendYield recovers TTM dividend yield from total-return vs price index", () => {
+  const priceRows = [];
+  const trRows = [];
+  let p = 100;
+  let tr = 200;
+  for (let i = 0; i < 400; i += 1) {
+    const d = new Date(Date.UTC(2025, 0, 1) + i * 86400000).toISOString().slice(0, 10);
+    if (i === 300) {
+      // 4.5% dividend paid out: price drops 4.5% ex-div while total return holds steady
+      p *= 1 - 0.045;
+    }
+    priceRows.push({ date: d, close: p });
+    trRows.push({ date: d, close: tr });
+  }
+  const implied = impliedDividendYield(priceRows, trRows);
+  assert.ok(implied);
+  assert.ok(Math.abs(implied.value - (4.5 / 95.5) * 100) < 0.05);
 });

@@ -141,9 +141,22 @@ export async function refreshEtfFlows(env, { now = new Date(), signal } = {}) {
     code: FUNDS[i][1], manager: FUNDS[i][2], shares: validNumber(r.f84), market_value: validNumber(r.f116),
   }));
   if (funds.some((r) => !r.shares || !r.market_value) || !validNumber(index.f117)) throw new Error("ETF 份额或指数流通市值不完整");
-  const stamps = rows.slice(0, -1).map((r) => Number(r.f124)).filter((n) => n > 0);
-  const quoteTime = stamps.length ? new Date(Math.max(...stamps) * 1000) : now;
-  const date = new Date(quoteTime.getTime() + 8 * 3600000).toISOString().slice(0, 10);
+  const stamps = [...rows.slice(0, -1), index].map((r) => Number(r.f124)).filter((n) => n > 0);
+  let quoteTime = stamps.length ? new Date(Math.max(...stamps) * 1000) : null;
+  if (!quoteTime) {
+    try {
+      const txStamp = (await tencentQuotes(["1.000300"], signal))[0]?.f124;
+      if (txStamp > 0) quoteTime = new Date(txStamp * 1000);
+    } catch { /* fallback to trading-day clamped clock */ }
+  }
+  if (!quoteTime) quoteTime = now;
+  const cnQuote = new Date(quoteTime.getTime() + 8 * 3600000);
+  if (!stamps.length) {
+    const dow = cnQuote.getUTCDay();
+    if (dow === 6) cnQuote.setUTCDate(cnQuote.getUTCDate() - 1);
+    else if (dow === 0) cnQuote.setUTCDate(cnQuote.getUTCDate() - 2);
+  }
+  const date = cnQuote.toISOString().slice(0, 10);
   const totalShares = funds.reduce((sum, r) => sum + r.shares, 0);
   const totalValue = funds.reduce((sum, r) => sum + r.market_value, 0);
   const rawIndexLevel = validNumber(index.f43);
@@ -156,11 +169,18 @@ export async function refreshEtfFlows(env, { now = new Date(), signal } = {}) {
   };
   const previous = await kvGet(env, HISTORY_KEY);
   const history = Array.isArray(previous) ? previous.filter((r) => r.date < date) : [];
+  const prevRow = history.at(-1);
+  if (prevRow && validNumber(prevRow.total_shares)) {
+    const jump = totalShares / prevRow.total_shares;
+    if (jump < 0.5 || jump > 2.0) {
+      throw new Error(`ETF 总份额单日跳变异常（${jump.toFixed(2)}x），已拦截写入保护历史序列`);
+    }
+  }
   history.push(current);
   const trimmed = history.slice(-120);
   await kvPut(env, HISTORY_KEY, trimmed);
   const payload = {
-    status: "fresh", as_of: date, quote_time: new Date(quoteTime.getTime() + 8 * 3600000).toISOString().slice(0, 19).replace("T", " "),
+    status: "fresh", as_of: date, quote_time: cnQuote.toISOString().slice(0, 19).replace("T", " "),
     ...current, ...flowPresentation(current, trimmed), funds,
     sample_days: trimmed.length, source, unit: "人民币元",
     methodology: "四只头部沪深300ETF场内总市值合计 ÷ 沪深300流通市值。ETF市值按行情口径，非定期报告的国家队持仓。",

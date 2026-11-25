@@ -1,0 +1,232 @@
+{
+  "model_version": "V3.2-auto-1.0",
+  "sample": {
+    "raw_start": "20130101",
+    "backtest_start": "20171229",
+    "end": "20261124",
+    "trading_days": 2159
+  },
+  "accounting": {
+    "equity_return_index": "H20269",
+    "etf_fee_annual": 0.002,
+    "cash_yield_annual": 0.018,
+    "risk_free_annual": 0.018,
+    "fee_one_way": 0.0005
+  },
+  "starting_core_50pct": {
+    "v3_1_legacy": {
+      "full": {
+        "start": "20171229",
+        "end": "20261124",
+        "cagr_calendar_pct": 7.276,
+        "max_drawdown_pct": -14.2692,
+        "sharpe": 0.5206,
+        "sharpe_zero_rf": 0.6695,
+        "end_nav": 1.86841
+      },
+      "pre_2022": {
+        "start": "20171229",
+        "end": "20220104",
+        "cagr_calendar_pct": 5.7812,
+        "max_drawdown_pct": -14.2692,
+        "sharpe": 0.3894,
+        "sharpe_zero_rf": 0.5337,
+        "end_nav": 1.252927
+      },
+      "post_2022": {
+        "start": "20220104",
+        "end": "20261124",
+        "cagr_calendar_pct": 8.5204,
+        "max_drawdown_pct": -11.663,
+        "sharpe": 0.6358,
+        "sharpe_zero_rf": 0.7888,
+        "end_nav": 1.86841
+      },
+      "buys": 23,
+      "sells": 53,
+      "trades": 76,
+      "may_july_ex_div_buys": 14,
+      "avg_exposure_pct": 71.21,
+      "turnover": 3.7573
+    },
+    "v3_2_upgraded": {
+      "full": {
+        "start": "20171229",
+        "end": "20261124",
+        "cagr_calendar_pct": 7.4381,
+        "max_drawdown_pct": -14.2154,
+        "sharpe": 0.5431,
+        "sharpe_zero_rf": 0.6953,
+        "end_nav": 1.893688
+      },
+      "pre_2022": {
+        "start": "20171229",
+        "end": "20220104",
+        "cagr_calendar_pct": 6.2468,
+        "max_drawdown_pct": -14.2154,
+        "sharpe": 0.4307,
+        "sharpe_zero_rf": 0.577,
+        "end_nav": 1.275224
+      },
+      "post_2022": {
+        "start": "20220104",
+        "end": "20261124",
+        "cagr_calendar_pct": 8.4271,
+        "max_drawdown_pct": -11.663,
+        "sharpe": 0.6436,
+        "sharpe_zero_rf": 0.8013,
+        "end_nav": 1.893688
+      },
+      "buys": 26,
+      "sells": 30,
+      "trades": 56,
+      "may_july_ex_div_buys": 12,
+      "avg_exposure_pct": 68.99,
+      "turnover": 4.7349
+    }
+  },
+  "starting_cash_0pct": {
+    "v3_1_legacy": {
+      "full": {
+        "start": "20171229",
+        "end": "20261124",
+        "cagr_calendar_pct": 7.6845,
+        "max_drawdown_pct": -14.2692,
+        "sharpe": 0.5782,
+        "sharpe_zero_rf": 0.7355,
+        "end_nav": 1.933191
+      },
+      "pre_2022": {
+        "start": "20171229",
+        "end": "20220104",
+        "cagr_calendar_pct": 6.676,
+        "max_drawdown_pct": -14.2692,
+        "sharpe": 0.5045,
+        "sharpe_zero_rf": 0.6674,
+        "end_nav": 1.296368
+      },
+      "post_2022": {
+        "start": "20220104",
+        "end": "20261124",
+        "cagr_calendar_pct": 8.5204,
+        "max_drawdown_pct": -11.663,
+        "sharpe": 0.6358,
+        "sharpe_zero_rf": 0.7888,
+        "end_nav": 1.933191
+      },
+      "buys": 25,
+      "sells": 53,
+      "trades": 78,
+      "may_july_ex_div_buys": 16,
+      "avg_exposure_pct": 62.91,
+      "turnover": 4.2389
+    },
+    "v3_2_upgraded": {
+      "full": {
+        "start": "20171229",
+        "end": "20261124",
+        "cagr_calendar_pct": 8.153,
+        "max_drawdown_pct": -11.663,
+        "sharpe": 0.6455,
+        "sharpe_zero_rf": 0.8113,
+        "end_nav": 2.009382
+      },
+      "pre_2022": {
+        "start": "20171229",
+        "end": "20220104",
+        "cagr_calendar_pct": 7.8204,
+        "max_drawdown_pct": -10.9135,
+        "sharpe": 0.6507,
+        "sharpe_zero_rf": 0.8283,
+        "end_nav": 1.353134
+      },
+      "post_2022": {
+        "start": "20220104",
+        "end": "20261124",
+        "cagr_calendar_pct": 8.4271,
+        "max_drawdown_pct": -11.663,
+        "sharpe": 0.6436,
+        "sharpe_zero_rf": 0.8013,
+        "end_nav": 2.009382
+      },
+      "buys": 29,
+      "sells": 30,
+      "trades": 59,
+      "may_july_ex_div_buys": 12,
+      "avg_exposure_pct": 58.49,
+      "turnover": 5.2174
+    }
+  },
+  "benchmarks": {
+    "buy_hold_100_h20269_net": {
+      "full": {
+        "start": "20171229",
+        "end": "20261124",
+        "cagr_calendar_pct": 7.6235,
+        "max_drawdown_pct": -27.6326,
+        "sharpe": 0.4278,
+        "sharpe_zero_rf": 0.532,
+        "end_nav": 1.923474
+      },
+      "pre_2022": {
+        "start": "20171229",
+        "end": "20220104",
+        "cagr_calendar_pct": 4.8496,
+        "max_drawdown_pct": -27.6326,
+        "sharpe": 0.2617,
+        "sharpe_zero_rf": 0.3577,
+        "end_nav": 1.209499
+      },
+      "post_2022": {
+        "start": "20220104",
+        "end": "20261124",
+        "cagr_calendar_pct": 9.9581,
+        "max_drawdown_pct": -14.1129,
+        "sharpe": 0.5914,
+        "sharpe_zero_rf": 0.7041,
+        "end_nav": 1.923474
+      },
+      "buys": 0,
+      "sells": 0,
+      "trades": 0,
+      "may_july_ex_div_buys": 0,
+      "avg_exposure_pct": 100.0,
+      "turnover": 0.0
+    },
+    "static_70_30_drift": {
+      "full": {
+        "start": "20171229",
+        "end": "20261124",
+        "cagr_calendar_pct": 6.1287,
+        "max_drawdown_pct": -19.4543,
+        "sharpe": 0.4183,
+        "sharpe_zero_rf": 0.5627,
+        "end_nav": 1.697666
+      },
+      "pre_2022": {
+        "start": "20171229",
+        "end": "20220104",
+        "cagr_calendar_pct": 3.9636,
+        "max_drawdown_pct": -19.4543,
+        "sharpe": 0.2399,
+        "sharpe_zero_rf": 0.3792,
+        "end_nav": 1.168558
+      },
+      "post_2022": {
+        "start": "20220104",
+        "end": "20261124",
+        "cagr_calendar_pct": 7.9419,
+        "max_drawdown_pct": -10.9842,
+        "sharpe": 0.5763,
+        "sharpe_zero_rf": 0.7256,
+        "end_nav": 1.697666
+      },
+      "buys": 0,
+      "sells": 0,
+      "trades": 0,
+      "may_july_ex_div_buys": 0,
+      "avg_exposure_pct": 70.0,
+      "turnover": 0.0
+    }
+  }
+}

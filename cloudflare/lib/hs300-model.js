@@ -1,18 +1,17 @@
 // HS300 decision model -- JavaScript port of hs300/model.py
 //
-// This is a deliberate re-implementation for the Worker runtime.  It must stay
-// byte-for-byte equivalent in RESULTS with the Python reference; that is what
-// cloudflare/hs300-parity.mjs verifies against the frozen snapshot.
+// Must stay byte-for-byte equivalent in RESULTS with the Python reference;
+// cloudflare/hs300-parity.mjs verifies every signal and trade step.
 //
-// Design rules (mirrors model.py):
+// Design rules (v2.5, mirrors model.py):
 //   * historical percentile pools exclude the current observation;
+//   * per-window PE ladder & ERP gate apply symmetric percentile hysteresis;
 //   * output exposure is discrete on a fixed grid;
 //   * signal at close of day t, filled at close of day t+1;
-//   * equity and cash are tracked separately; fees hit NAV.
+//   * equity and cash are tracked separately with calendar-day ETF fee & cash yield.
 
 import modelConfig from "../../hs300/config.json" with { type: "json" };
 
-// Python and Workers consume the same configuration.
 export const DEFAULT_CONFIG = modelConfig;
 
 // --------------------------------------------------------------------------- //
@@ -25,8 +24,36 @@ export function ladderExposure(pePct, ladder) {
   return ladder[ladder.length - 1].exposure;
 }
 
+export function ladderWithHysteresis(pePct, ladder, prevExposure = null, hysteresisPp = 0) {
+  const raw = ladderExposure(pePct, ladder);
+  if (prevExposure === null || prevExposure === undefined || !(hysteresisPp > 0) || Math.abs(raw - prevExposure) <= 1e-12) {
+    return raw;
+  }
+  if (raw > prevExposure) {
+    const shifted = ladder.map(({ min_pct, exposure }) => ({
+      min_pct: min_pct > 0 ? Math.max(0, min_pct - hysteresisPp) : 0,
+      exposure,
+    }));
+    return Math.max(prevExposure, ladderExposure(pePct, shifted));
+  }
+  const shifted = ladder.map(({ min_pct, exposure }) => ({
+    min_pct: min_pct > 0 ? Math.min(100, min_pct + hysteresisPp) : 0,
+    exposure,
+  }));
+  return Math.min(prevExposure, ladderExposure(pePct, shifted));
+}
+
 export function erpGate(erpPct, lo, hi) {
   return Math.max(0, Math.min(1, (erpPct - lo) / (hi - lo)));
+}
+
+export function erpGateWithHysteresis(erpPct, lo, hi, prevGate = null, hysteresisPp = 0) {
+  const raw = erpGate(erpPct, lo, hi);
+  if (prevGate === null || prevGate === undefined || !(hysteresisPp > 0) || Math.abs(raw - prevGate) <= 1e-12) {
+    return raw;
+  }
+  if (raw > prevGate) return Math.max(prevGate, erpGate(erpPct - hysteresisPp, lo, hi));
+  return Math.min(prevGate, erpGate(erpPct + hysteresisPp, lo, hi));
 }
 
 export function quantizeDown(value, grid) {
@@ -35,11 +62,17 @@ export function quantizeDown(value, grid) {
   return Math.min(1, Math.max(0, steps * grid));
 }
 
-export function targetExposure(pePct, erpPct, cfg = DEFAULT_CONFIG) {
+export function targetExposureStateful(pePct, erpPct, cfg = DEFAULT_CONFIG, prevState = null) {
   if (![pePct, erpPct].every(Number.isFinite)) throw new Error("invalid percentile");
-  const lad = ladderExposure(pePct, cfg.allocation.pe_ladder);
-  const gate = erpGate(erpPct, cfg.allocation.erp_gate.lo, cfg.allocation.erp_gate.hi);
-  return quantizeDown(Math.min(lad, gate), cfg.allocation.grid);
+  const hPe = cfg.allocation.hysteresis?.pe_percentile_pp || 0;
+  const hErp = cfg.allocation.hysteresis?.erp_percentile_pp || 0;
+  const lad = ladderWithHysteresis(pePct, cfg.allocation.pe_ladder, prevState?.pe_cap ?? null, hPe);
+  const gate = erpGateWithHysteresis(erpPct, cfg.allocation.erp_gate.lo, cfg.allocation.erp_gate.hi, prevState?.erp_cap ?? null, hErp);
+  return { exposure: quantizeDown(Math.min(lad, gate), cfg.allocation.grid), pe_cap: lad, erp_cap: gate };
+}
+
+export function targetExposure(pePct, erpPct, cfg = DEFAULT_CONFIG) {
+  return targetExposureStateful(pePct, erpPct, cfg, null).exposure;
 }
 
 export function percentileOfHistory(history, current) {
@@ -50,7 +83,6 @@ export function percentileOfHistory(history, current) {
   return (100 * below) / history.length;
 }
 
-// Sentinel: windows disagree -> keep the current position untouched.
 export const HOLD = "HOLD";
 
 export function windowSlice(history, spec) {
@@ -65,28 +97,33 @@ export function windowPercentile(history, current, spec) {
   return percentileOfHistory(pool, current);
 }
 
-export function windowTargets(peHist, erpHist, peNow, erpNow, cfg = DEFAULT_CONFIG) {
+export function windowTargets(peHist, erpHist, peNow, erpNow, cfg = DEFAULT_CONFIG, prevStates = null) {
   const perWindow = {};
+  const nextStates = {};
   const values = [];
   for (const spec of cfg.indicators.percentile_windows) {
     const pp = windowPercentile(peHist, peNow, spec);
     const ep = windowPercentile(erpHist, erpNow, spec);
     if (pp === null || ep === null) {
-      perWindow[spec.name] = { label: spec.label || spec.name, pePercentile: null, erpPercentile: null, exposure: null };
+      perWindow[spec.name] = {
+        label: spec.label || spec.name,
+        pePercentile: null, erpPercentile: null, exposure: null, peCap: null, erpCap: null,
+      };
+      nextStates[spec.name] = prevStates?.[spec.name] ?? null;
       continue;
     }
-    const expo = targetExposure(pp, ep, cfg);
-    values.push(expo);
+    const st = targetExposureStateful(pp, ep, cfg, prevStates?.[spec.name] ?? null);
+    values.push(st.exposure);
+    nextStates[spec.name] = { pe_cap: st.pe_cap, erp_cap: st.erp_cap };
     perWindow[spec.name] = {
       label: spec.label || spec.name,
       pePercentile: +pp.toFixed(4),
       erpPercentile: +ep.toFixed(4),
-      exposure: expo,
+      exposure: st.exposure,
+      peCap: st.pe_cap,
+      erpCap: +st.erp_cap.toFixed(6),
     };
   }
-  // Tolerance rule: require agreement within `tolerance_steps` grid steps and
-  // take the conservative end of the cluster (three windows rarely coincide
-  // exactly outside extremes).
   const grid = cfg.allocation.grid;
   const tol = (cfg.allocation.tolerance_steps || 0) * grid;
   const span = values.length ? Math.max(...values) - Math.min(...values) : null;
@@ -100,25 +137,31 @@ export function windowTargets(peHist, erpHist, peNow, erpNow, cfg = DEFAULT_CONF
     span,
     tolerance: tol,
     vote: values.length ? Math.min(...values) : null,
+    min_exposure: values.length ? Math.min(...values) : null,
+    max_exposure: values.length ? Math.max(...values) : null,
     consensus_exposure: chosen,
+    next_state: nextStates,
   };
 }
 
 // --------------------------------------------------------------------------- //
 // signal series
 // --------------------------------------------------------------------------- //
-export function buildSignals(series, cfg = DEFAULT_CONFIG) {
+export function buildSignalDetail(series, cfg = DEFAULT_CONFIG) {
   const minPe = cfg.indicators.pe_percentile.min_obs;
   const minErp = cfg.indicators.erp_percentile.min_obs;
   const out = [];
   const peHist = [];
   const erpHist = [];
+  let winState = null;
   for (let i = 0; i < series.dates.length; i += 1) {
     if (peHist.length < minPe || erpHist.length < minErp) {
       out.push(null);
     } else {
-      const info = windowTargets(peHist, erpHist, series.pe[i], series.spread[i], cfg);
-      out.push(info.consensus_exposure);
+      const info = windowTargets(peHist, erpHist, series.pe[i], series.spread[i], cfg, winState);
+      info.prev_state = winState;
+      winState = info.next_state;
+      out.push(info);
     }
     peHist.push(series.pe[i]);
     erpHist.push(series.spread[i]);
@@ -126,23 +169,25 @@ export function buildSignals(series, cfg = DEFAULT_CONFIG) {
   return out;
 }
 
-// Same walk as buildSignals but keeps each window's numbers for the UI.
-export function buildSignalDetail(series, cfg = DEFAULT_CONFIG) {
+export function buildSignals(series, cfg = DEFAULT_CONFIG) {
+  return buildSignalDetail(series, cfg).map((row) => (row ? row.consensus_exposure : null));
+}
+
+export function windowStateAt(series, endExclusive, cfg = DEFAULT_CONFIG) {
   const minPe = cfg.indicators.pe_percentile.min_obs;
   const minErp = cfg.indicators.erp_percentile.min_obs;
-  const out = [];
   const peHist = [];
   const erpHist = [];
-  for (let i = 0; i < series.dates.length; i += 1) {
-    if (peHist.length < minPe || erpHist.length < minErp) {
-      out.push(null);
-    } else {
-      out.push(windowTargets(peHist, erpHist, series.pe[i], series.spread[i], cfg));
+  let winState = null;
+  const limit = Math.min(Math.max(0, endExclusive), series.dates.length);
+  for (let i = 0; i < limit; i += 1) {
+    if (peHist.length >= minPe && erpHist.length >= minErp) {
+      winState = windowTargets(peHist, erpHist, series.pe[i], series.spread[i], cfg, winState).next_state;
     }
     peHist.push(series.pe[i]);
     erpHist.push(series.spread[i]);
   }
-  return out;
+  return winState;
 }
 
 // --------------------------------------------------------------------------- //
@@ -169,6 +214,24 @@ export function rebalanceTo(acct, target, fee) {
   return { notional, tradedFraction: Math.abs(notional) / nav };
 }
 
+function calendarDays(d0Compact, d1Compact) {
+  const t0 = Date.parse(`${d0Compact.slice(0, 4)}-${d0Compact.slice(4, 6)}-${d0Compact.slice(6, 8)}T00:00:00Z`);
+  const t1 = Date.parse(`${d1Compact.slice(0, 4)}-${d1Compact.slice(4, 6)}-${d1Compact.slice(6, 8)}T00:00:00Z`);
+  return Math.max(1, Math.round((t1 - t0) / 86400000));
+}
+
+export function intervalReturns(trPrev, trCurr, calDays, cfg = DEFAULT_CONFIG) {
+  const rawEq = trCurr / trPrev - 1;
+  const etfFee = cfg.execution.etf_fee_annual || 0;
+  const etfDrag = etfFee > 0 ? (1 - etfFee) ** (calDays / 365.25) : 1;
+  const netEq = (1 + rawEq) * etfDrag - 1;
+  const cashAnnual = cfg.execution.cash_yield_annual || 0;
+  const cashRet = cashAnnual > 0
+    ? ((1 + cashAnnual) ** (calDays / 365.25) - 1)
+    : (cfg.execution.cash_yield || 0);
+  return { eqRet: netEq, cashRet };
+}
+
 // --------------------------------------------------------------------------- //
 // execution state machine
 // --------------------------------------------------------------------------- //
@@ -191,15 +254,14 @@ export function runBacktest(series, cfg = DEFAULT_CONFIG, signals = null, lag = 
 
   for (let i = first + 1; i < n; i += 1) {
     // (1) earn the interval (i-1, i] with the weight held entering it
-    const ret = series.tr[i] / series.tr[i - 1] - 1;
-    acct.equity *= 1 + ret;
-    acct.cash *= 1 + cfg.execution.cash_yield;
+    const calDays = calendarDays(series.dates[i - 1], series.dates[i]);
+    const { eqRet, cashRet } = intervalReturns(series.tr[i - 1], series.tr[i], calDays, cfg);
+    acct.equity *= 1 + eqRet;
+    acct.cash *= 1 + cashRet;
 
     // (2) confirmation on the target known at close of day i
     const src = i - lag;
     let desired = src >= first ? sig[src] : null;
-    // HOLD = windows disagree -> take no action at all; the position stays put
-    // and no confirmation streak is carried over.
     if (desired === HOLD) desired = null;
     if (desired === null || desired === undefined) {
       prevTarget = null; streak = 0;
@@ -241,7 +303,7 @@ export function runBacktest(series, cfg = DEFAULT_CONFIG, signals = null, lag = 
 // --------------------------------------------------------------------------- //
 // metrics
 // --------------------------------------------------------------------------- //
-export function metrics(curve, periodsPerYear = 252) {
+export function metrics(curve, periodsPerYear = 252, riskFreeAnnual = 0) {
   if (!curve.length) return {};
   const values = curve.map(([, v]) => v);
   const d0 = new Date(`${curve[0][0].slice(0, 4)}-${curve[0][0].slice(4, 6)}-${curve[0][0].slice(6, 8)}`);
@@ -255,8 +317,12 @@ export function metrics(curve, periodsPerYear = 252) {
   }
   const rets = [];
   for (let i = 1; i < values.length; i += 1) rets.push(values[i] / values[i - 1] - 1);
-  const mean = rets.length ? rets.reduce((a, b) => a + b, 0) / rets.length : 0;
-  const sd = rets.length ? Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / rets.length) : 0;
+  const rfDaily = riskFreeAnnual > 0 ? ((1 + riskFreeAnnual) ** (1 / periodsPerYear) - 1) : 0;
+  const exRets = rets.map((r) => r - rfDaily);
+  const mean = exRets.length ? exRets.reduce((a, b) => a + b, 0) / exRets.length : 0;
+  const sd = exRets.length ? Math.sqrt(exRets.reduce((a, r) => a + (r - mean) ** 2, 0) / exRets.length) : 0;
+  const rawMean = rets.length ? rets.reduce((a, b) => a + b, 0) / rets.length : 0;
+  const rawSd = rets.length ? Math.sqrt(rets.reduce((a, r) => a + (r - rawMean) ** 2, 0) / rets.length) : 0;
   return {
     start: curve[0][0], end: curve[curve.length - 1][0],
     yearsCalendar: +years.toFixed(4),
@@ -264,6 +330,7 @@ export function metrics(curve, periodsPerYear = 252) {
     cagr252Pct: rets.length ? +(((values[values.length - 1] / values[0]) ** (periodsPerYear / rets.length) - 1) * 100).toFixed(4) : null,
     maxDrawdownPct: +(mdd * 100).toFixed(4),
     sharpe: sd > 0 ? +((mean / sd) * Math.sqrt(periodsPerYear)).toFixed(4) : null,
+    sharpeZeroRf: rawSd > 0 ? +((rawMean / rawSd) * Math.sqrt(periodsPerYear)).toFixed(4) : null,
     endNav: +values[values.length - 1].toFixed(6),
     days: values.length,
   };

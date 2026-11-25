@@ -17,6 +17,16 @@ const REFRESH_HOURS = new Set(
     .map((value) => Number(value.trim()))
     .filter((value) => Number.isInteger(value) && value >= 0 && value <= 23),
 );
+const DEFAULT_SLOTS = "10:00,11:00,12:00,13:00,14:00,15:15,17:30,19:30";
+const REFRESH_SLOTS = new Set(
+  (process.env.REFRESH_SLOTS
+    ? process.env.REFRESH_SLOTS.split(",")
+    : process.env.REFRESH_HOURS
+      ? [...REFRESH_HOURS].map((hour) => `${String(hour).padStart(2, "0")}:${String(REFRESH_MINUTE).padStart(2, "0")}`)
+      : DEFAULT_SLOTS.split(","))
+    .map((slot) => slot.trim())
+    .filter((slot) => /^([01]\d|2[0-3]):[0-5]\d$/.test(slot)),
+);
 const RUN_ON_START = /^(1|true|yes)$/i.test(process.env.RUN_ON_START || "true");
 
 const worker = (await import("./cloudflare/worker.js")).default;
@@ -65,14 +75,17 @@ function localDay(parts) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+function hhmm(parts) {
+  return `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
+}
+
 function scheduledSlot(parts) {
-  return `${localDay(parts)}T${String(parts.hour).padStart(2, "0")}:${String(REFRESH_MINUTE).padStart(2, "0")}`;
+  return `${localDay(parts)}T${hhmm(parts)}`;
 }
 
 function isScheduledSlot(parts) {
   return parts.weekday >= 1 && parts.weekday <= 5
-    && REFRESH_HOURS.has(parts.hour)
-    && parts.minute === REFRESH_MINUTE;
+    && REFRESH_SLOTS.has(hhmm(parts));
 }
 
 await fs.mkdir(DATA_DIR, { recursive: true });
@@ -113,6 +126,7 @@ async function assetFetch(request) {
   let relative = decodeURIComponent(url.pathname);
   if (relative === "/" || relative === "") relative = "/index.html";
   else if (relative === "/hs300" || relative === "/hs300/") relative = "/hs300.html";
+  else if (relative === "/portfolio" || relative === "/portfolio/") relative = "/portfolio.html";
   const target = path.resolve(ASSET_DIR, `.${relative}`);
   if (target !== ASSET_DIR && !target.startsWith(`${ASSET_DIR}${path.sep}`)) {
     return new Response("Forbidden", { status: 403 });
@@ -193,6 +207,7 @@ const server = http.createServer(async (request, response) => {
         schedule: {
           timezone: TIME_ZONE,
           weekdays: "Mon-Fri",
+          slots: [...REFRESH_SLOTS].sort(),
           hours: [...REFRESH_HOURS].sort((a, b) => a - b),
           minute: REFRESH_MINUTE,
           run_on_start: RUN_ON_START,
@@ -250,7 +265,7 @@ const scheduleTimer = setInterval(() => {
 server.listen(PORT, HOST, () => {
   console.log(`H30269 local dashboard listening on http://${HOST}:${PORT}`);
   console.log(`Data directory: ${DATA_DIR}`);
-  console.log(`Scheduled refresh: Mon-Fri ${[...REFRESH_HOURS].sort((a, b) => a - b).map((hour) => `${String(hour).padStart(2, "0")}:${String(REFRESH_MINUTE).padStart(2, "0")}`).join(", ")} ${TIME_ZONE}`);
+  console.log(`Scheduled refresh: Mon-Fri ${[...REFRESH_SLOTS].sort().join(", ")} ${TIME_ZONE}`);
   if (RUN_ON_START) {
     const parts = timeParts();
     lastScheduledSlot = scheduledSlot(parts);

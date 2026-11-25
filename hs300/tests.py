@@ -11,7 +11,8 @@ import unittest
 import copy
 
 from data import align
-from model import (Account, Config, Series, build_signals, ladder_exposure,
+from model import (Account, Config, Series, build_signals, erp_gate_with_hysteresis,
+                   interval_returns, ladder_exposure, ladder_with_hysteresis,
                    metrics, percentile_of_history, quantize_down, run_backtest,
                    target_exposure)
 from model import HOLD, window_targets
@@ -70,6 +71,30 @@ class TestAllocation(unittest.TestCase):
 
     def test_percentile_excludes_current(self):
         self.assertAlmostEqual(percentile_of_history([1, 2, 3], 2), 200 / 3)
+
+    def test_hysteresis_suppresses_small_boundary_whipsaw(self):
+        lad = CFG.ladder
+        # Holding 0.625 (PE < 50%): small uptick to 51.5% stays at 0.625 under ±2.0pp buffer,
+        # while crossing >= 52.0% steps down to 0.375.
+        self.assertAlmostEqual(ladder_with_hysteresis(51.5, lad, 0.625, 2.0), 0.625, places=9)
+        self.assertAlmostEqual(ladder_with_hysteresis(52.1, lad, 0.625, 2.0), 0.375, places=9)
+        # Holding 0.375 (PE >= 50%): small dip to 48.5% stays at 0.375, < 48.0% steps up to 0.625.
+        self.assertAlmostEqual(ladder_with_hysteresis(48.5, lad, 0.375, 2.0), 0.375, places=9)
+        self.assertAlmostEqual(ladder_with_hysteresis(47.9, lad, 0.375, 2.0), 0.625, places=9)
+        # ERP gate hysteresis keeps gate unchanged inside ±2.0pp buffer
+        prev_gate = 0.5  # corresponds to erp_pct = 40.0 on [20, 60]
+        self.assertAlmostEqual(erp_gate_with_hysteresis(41.5, 20.0, 60.0, prev_gate, 2.0), 0.5, places=9)
+        self.assertAlmostEqual(erp_gate_with_hysteresis(38.5, 20.0, 60.0, prev_gate, 2.0), 0.5, places=9)
+        self.assertGreater(erp_gate_with_hysteresis(43.0, 20.0, 60.0, prev_gate, 2.0), 0.5)
+
+    def test_calendar_day_cash_yield_and_etf_drag(self):
+        eq_ret, cash_ret = interval_returns(100.0, 100.0, 365, CFG)
+        self.assertLess(eq_ret, 0.0)
+        self.assertGreater(cash_ret, 0.015)
+        m = metrics([("20250101", 1.0), ("20250601", 1.05), ("20260101", 1.12)], risk_free_annual=0.018)
+        self.assertIsNotNone(m["sharpe"])
+        self.assertIsNotNone(m["sharpe_zero_rf"])
+        self.assertLess(m["sharpe"], m["sharpe_zero_rf"])
 
 
 class TestAccount(unittest.TestCase):

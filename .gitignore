@@ -27,10 +27,18 @@ node_modules/
 Thumbs.db
 
 
-# HS300: snapshot + parity baseline MUST be tracked (used by parity test)
+# HS300 & H30269: snapshots + parity/backtest baselines MUST be tracked
 !raw_data.json
 !hs300/reports/
 !hs300/reports/parity_expected.json
 !hs300/reports/results.json
 !hs300/reports/triggers.json
 !hs300/reports/sensitivity.json
+!h30269/
+!h30269/raw_data.json
+!h30269/reports/
+!h30269/reports/results.json
+!portfolio/
+!portfolio/reports/
+!portfolio/reports/results.json
+!portfolio/reports/parity_expected.json

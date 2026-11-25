@@ -1,8 +1,11 @@
-import { DEFAULT_CONFIG, HOLD, ladderExposure, targetExposure, windowTargets } from "./hs300-model.js";
+import { DEFAULT_CONFIG, HOLD, ladderExposure, windowStateAt, windowTargets } from "./hs300-model.js";
 
-export function signalDetail(series, cfg = DEFAULT_CONFIG) {
+export function signalDetail(series, cfg = DEFAULT_CONFIG, prevState = undefined) {
   const i = series.dates.length - 1;
-  return windowTargets(series.pe.slice(0, i), series.spread.slice(0, i), series.pe[i], series.spread[i], cfg);
+  const state = prevState === undefined ? windowStateAt(series, i, cfg) : prevState;
+  const detail = windowTargets(series.pe.slice(0, i), series.spread.slice(0, i), series.pe[i], series.spread[i], cfg, state);
+  detail.prev_state = state;
+  return detail;
 }
 
 export function confirmationState(signals, cfg = DEFAULT_CONFIG) {
@@ -25,40 +28,29 @@ export function confirmationState(signals, cfg = DEFAULT_CONFIG) {
   };
 }
 
-function upperBound(pool, value) {
-  let lo = 0, hi = pool.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (pool[mid] <= value) lo = mid + 1; else hi = mid;
-  }
-  return lo;
-}
-
 // Conditional NEXT-close scenarios, including today's settled observation in
-// the historical pool. Earnings and the dated bond yield are held constant.
-// Every PE/ERP rank discontinuity is scanned, so no coarse price grid can miss
-// a narrow interval in which all windows agree.
+// the historical pool and respecting configured hysteresis & tolerance_steps.
 export function conditionalLevels(series, price, bond, cfg = DEFAULT_CONFIG, context = {}) {
   if (!(price > 0) || !Number.isFinite(bond)) return { buy: null, sell: null, reason: "missing inputs" };
   const currentPe = context.peNow ?? series.pe.at(-1);
   const peHistory = context.peHist ?? series.pe;
   const erpHistory = context.erpHist ?? series.spread;
+  const detail = context.detail ?? signalDetail(series, cfg);
+  const stateEntering = context.prevStates !== undefined ? context.prevStates : (detail.next_state ?? windowStateAt(series, series.dates.length, cfg));
   const factor = price / currentPe;
+
   const pools = cfg.indicators.percentile_windows.map((spec) => {
     const count = spec.mode === "rolling" ? spec.days : peHistory.length;
-    return { spec, pe: peHistory.slice(-count).sort((a, b) => a - b),
-      erp: erpHistory.slice(-count).sort((a, b) => a - b) };
+    return {
+      spec,
+      pe: peHistory.slice(-count).sort((a, b) => a - b),
+      erp: erpHistory.slice(-count).sort((a, b) => a - b),
+    };
   });
   const evaluatePe = (pe) => {
-    const targets = pools.map(({ spec, pe: ph, erp: eh }) => {
-      if (ph.length < (spec.min_obs || 1) || eh.length < (spec.min_obs || 1)) return null;
-      return targetExposure(100 * upperBound(ph, pe) / ph.length,
-        100 * upperBound(eh, 100 / pe - bond) / eh.length, cfg);
-    });
-    if (targets.some((v) => v === null)) return HOLD;
-    return Math.max(...targets) - Math.min(...targets) <= 1e-9 ? targets[0] : HOLD;
+    const res = windowTargets(peHistory, erpHistory, pe, 100 / pe - bond, cfg, stateEntering);
+    return res.agreed ? res.consensus_exposure : HOLD;
   };
-  const detail = context.detail ?? signalDetail(series, cfg);
   const todayTargets = Object.values(detail.windows).map((w) => w.exposure).filter(Number.isFinite);
   if (todayTargets.length !== pools.length) return { buy: null, sell: null, reason: "insufficient windows" };
   const currentMin = Math.min(...todayTargets), currentMax = Math.max(...todayTargets);
@@ -68,8 +60,6 @@ export function conditionalLevels(series, price, bond, cfg = DEFAULT_CONFIG, con
     for (const value of pool.erp) if (value + bond > 0) events.add(100 / (value + bond));
   }
   const sorted = [...events].filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
-  // Use whole index points for readable lines and verify the rounded point
-  // with the actual rule. A boundary itself can belong to the opposite band.
   const find = (direction) => {
     const candidates = sorted.filter((v) => direction === "buy" ? v <= currentPe : v >= currentPe);
     if (direction === "buy") candidates.reverse();
@@ -86,7 +76,7 @@ export function conditionalLevels(series, price, bond, cfg = DEFAULT_CONFIG, con
   return {
     buy: find("buy"), sell: find("sell"),
     reference_min: currentMin, reference_max: currentMax,
-    assumption: context.assumption ?? "仅估算下一收盘日：保持盈利、10年国债收益率不变，并把本次收盘纳入历史。实际数据更新后须重新确认；不等于限价单。",
+    assumption: context.assumption ?? "仅估算下一收盘日：保持盈利、10年国债收益率不变，并把本次收盘纳入历史（含回滞状态）。实际数据更新后须重新确认；不等于限价单。",
   };
 }
 
@@ -99,7 +89,6 @@ export function valuationTable(series, price, cfg = DEFAULT_CONFIG) {
       target_below: ladderExposure(band.min_pct - 1e-9, cfg.allocation.pe_ladder), levels: {}, pe: {} };
     for (const spec of cfg.indicators.percentile_windows) {
       const pool = (spec.mode === "rolling" ? peHist.slice(-spec.days) : peHist).slice().sort((a, b) => a - b);
-      // ECDF uses <=, so ceil(p*N)-1 is the FIRST observation attaining p%.
       const value = pool[Math.max(0, Math.ceil(band.min_pct * pool.length / 100) - 1)];
       row.pe[spec.name] = value ?? null;
       row.levels[spec.name] = Number.isFinite(value) ? +(price * value / peNow).toFixed(1) : null;
@@ -114,19 +103,26 @@ export function valuationTable(series, price, cfg = DEFAULT_CONFIG) {
   return { boundaries, ladder };
 }
 
-export function dataQuality(series, bondDate, now = new Date()) {
+export function dataQuality(series, bondDate, now = new Date(), { allowHolidayGap = false } = {}) {
   const latest = series.dates.at(-1);
   const today = new Date(now.getTime() + 8 * 3600000).toISOString().slice(0, 10).replaceAll("-", "");
   const parse = (s) => typeof s === "string" && /^\d{8}$/.test(s)
     ? Date.parse(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`) : NaN;
   const age = (s) => Math.floor((parse(today) - parse(s)) / 86400000);
+  const maxPriceDays = allowHolidayGap ? 14 : 4;
+  const maxBondDays = allowHolidayGap ? 16 : 7;
   const blockers = [];
-  // Weekends are tolerated; long exchange holidays require a fresh official
-  // daily bar before actionable advice resumes. Never silently assume open.
-  if (!Number.isFinite(age(latest)) || age(latest) < 0 || age(latest) > 4) blockers.push("指数收盘数据超过4个日历日或日期异常，暂停交易提示");
-  if (!Number.isFinite(age(bondDate)) || age(bondDate) < 0 || age(bondDate) > 7) blockers.push("国债收益率超过7个日历日或日期异常，暂停交易提示");
-  return { actionable: blockers.length === 0, blockers, price_date: latest, bond_date: bondDate,
-    price_age_days: latest ? age(latest) : null, bond_age_days: bondDate ? age(bondDate) : null };
+  if (!Number.isFinite(age(latest)) || age(latest) < 0 || age(latest) > maxPriceDays) {
+    blockers.push(`指数收盘数据超过${maxPriceDays}个日历日或日期异常，暂停交易提示`);
+  }
+  if (!Number.isFinite(age(bondDate)) || age(bondDate) < 0 || age(bondDate) > maxBondDays) {
+    blockers.push(`国债收益率超过${maxBondDays}个日历日或日期异常，暂停交易提示`);
+  }
+  return {
+    actionable: blockers.length === 0, blockers, price_date: latest, bond_date: bondDate,
+    price_age_days: latest ? age(latest) : null, bond_age_days: bondDate ? age(bondDate) : null,
+    holiday_bridged: Boolean(allowHolidayGap && age(latest) > 4 && blockers.length === 0),
+  };
 }
 
 export function dashboardQuality(data, now = new Date(), sourceWarning = null) {
@@ -134,8 +130,6 @@ export function dashboardQuality(data, now = new Date(), sourceWarning = null) {
   const cn = new Date(now.getTime() + 8 * 3600000);
   const today = cn.toISOString().slice(0, 10).replaceAll("-", "");
   const weekday = cn.getUTCDay() > 0 && cn.getUTCDay() < 6;
-  // This is a publication check, not an exchange-calendar claim. A holiday or
-  // a delayed feed both mean: no new close is available; do not fabricate one.
   const awaiting = weekday && cn.getUTCHours() * 60 + cn.getUTCMinutes() >= 15 * 60 + 10 && data.price_asof < today;
   const blockers = [...base.blockers];
   if (awaiting) blockers.push("新收盘日线尚未取得，等待官方发布；上一收盘日分析仅供参考");
