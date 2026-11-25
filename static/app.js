@@ -255,7 +255,7 @@ function renderSummary(payload) {
   const execution = normalizeExecution(evaluation);
   const tone = decisionTone(evaluation);
 
-  $("#signalPanel").className = `action-rail tone-${tone}`;
+  $("#signalPanel").className = `hero-card tone-${tone}`;
   document.body.dataset.tone = tone;
   setText("#signalStateText", evaluation.decision);
   setDecisionText(evaluation.decision);

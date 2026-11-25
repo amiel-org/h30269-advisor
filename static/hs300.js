@@ -93,7 +93,7 @@ function render(data){
  $('#verdict').textContent=title;$('#topVerdict').textContent=title;
  $('#analysisMode').textContent=quoteLabel(a);
  $('#quoteBadge').textContent=localOffline?'连接中断':a.quote_quality?.status==='trading'?'行情及时':a.quote_quality?.status==='delayed'?'行情延迟':'最近报价';
- $('#hero').className=`action-rail ${agreed&&c.exposure>=.625?'tone-buy':agreed&&c.exposure<=.125?'tone-sell':'tone-hold'}`;
+ $('#hero').className=`hero-card ${agreed&&c.exposure>=.625?'tone-buy':agreed&&c.exposure<=.125?'tone-sell':'tone-hold'}`;
  const targets=ORDER.map(k=>`${LABEL[k]}参考仓位 ${pct(Number.isFinite(a.windows?.[k]?.exposure)?a.windows[k].exposure*100:null)}`).join(' / ');
  $('#verdictSay').textContent=agreed?`当前点位 ${num(a.price)}，三窗口目标一致。填入你的现仓，可立即比较增减方向。${stale?' 当前为参考测算。':''}`:`三段历史算出的参考仓位不同：${targets}。当前没有统一目标；填写仓位后，可看保持不动的整体结果和各窗口情景。`;
  $('#targetExposure').textContent=agreed?pct(c.exposure*100):'不触发调仓';
@@ -102,8 +102,12 @@ function render(data){
  $('#topQuoteTime').textContent=`${ymd(a.date)} ${a.time||'日线'}`;
  $('#closeValue').textContent=num(a.price);$('#closeValue').className=a.change_pct>=0?'up':'down';$('#closeDate').textContent=`${ymd(a.date)} ${a.time||''} · ${a.source}`;
  $('#priceLabel').textContent=a.mode==='quote_estimate'?'当前报价':'收盘基准';
- const fresh=$('#freshBanner');fresh.className=`hs-fresh${stale||data.source_warning||localOffline?' warning':''}`;
- fresh.textContent=`${quoteLabel(a)} · ${ymd(a.date)} ${a.time||''} · ${a.source}。PE ${num(a.pe)}、ERP ${pct(a.erp,2)}、三窗口目标均按该点位计算。盈利基准 ${ymd(a.baseline.date)}；国债 ${ymd(a.bond.as_of)}。`+(data.source_warning?' 历史基准核验暂不可用，当前结果带此限制。':'')+(a.quote_quality?.status==='delayed'?' 报价已延迟，暂停新增动作。':'')+(localOffline?' 连接暂未恢复，当前为上次报价分析。':'');
+ const fresh=$('#freshBanner');fresh.className=`hs-status-bar${stale||data.source_warning||localOffline?' warning':''}`;
+ const freshTarget=$('#freshText')||fresh;
+ freshTarget.textContent=`${quoteLabel(a)} · ${ymd(a.date)} ${a.time||''} · ${a.source}。PE ${num(a.pe)}、ERP ${pct(a.erp,2)}、三窗口目标均按该点位计算。盈利基准 ${ymd(a.baseline.date)}；国债 ${ymd(a.bond.as_of)}。`+(data.source_warning?' 历史基准核验暂不可用，当前结果带此限制。':'')+(a.quote_quality?.status==='delayed'?' 报价已延迟，暂停新增动作。':'')+(localOffline?' 连接暂未恢复，当前为上次报价分析。':'');
+ const buyLine=a.conditional_levels?.buy,sellLine=a.conditional_levels?.sell;
+ if($('#heroBuyLine'))$('#heroBuyLine').textContent=buyLine?`买 ${num(buyLine.level,0)} (${signed((buyLine.level/a.price-1)*100,1)}%)`:'买 暂无';
+ if($('#heroSellLine'))$('#heroSellLine').textContent=sellLine?`卖 ${num(sellLine.level,0)} (${signed((sellLine.level/a.price-1)*100,1)}%)`:'卖 暂无';
  $('#settledSummary').textContent=`${ymd(data.price_asof)} · ${num(data.price_index?.level)} · PE ${num(data.pe)}`;
  const ex=data.execution||{};$('#confirmationText').textContent=`原收盘策略：同目标已确认 ${ex.confirmed_closes||0} 次收盘。盘中刷新不增加确认次数。`;
  $('#px').textContent=num(a.price);$('#pe').textContent=num(a.pe);$('#pep').textContent=pct(a.pe_percentile);$('#erp').textContent=pct(a.erp,2);

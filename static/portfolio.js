@@ -108,8 +108,8 @@ function updateHeroUnfilled(data) {
     tone = "sell";
   }
 
-  $("#actionHero").className = `pf-hero tone-${tone}`;
-  $("#heroEyebrow").textContent = "今日总池大方向（在下方填入你的实际金额后，会精确算出今天买/卖多少钱）";
+  $("#actionHero").className = `hero-card tone-${tone}`;
+  $("#heroEyebrow").textContent = "今日总池大方向（在右侧填入实际持仓后，会精确算出买卖金额）";
   $("#heroTitle").textContent = title;
   $("#heroSubtitle").textContent = `${data.regime?.title || ""}：${data.regime?.summary || ""}`;
 
@@ -119,8 +119,13 @@ function updateHeroUnfilled(data) {
   $("#heroDivAction").textContent = div.decision || "持有观察";
   $("#heroDivReason").textContent = `全收益40日Beta差 ${signedPct(div.beta_adjusted_spread_pct, 2)} · PE分位 ${pct(div.pe_percentile)}`;
 
-  $("#heroCashAction").textContent = "填入下方金额后自动计算";
-  $("#heroCashReason").textContent = "点击下方「示例」按钮可 1 秒体验完整操作清单";
+  $("#heroCashAction").textContent = "填入右侧金额后自动计算";
+  $("#heroCashReason").textContent = "点击右侧「示例」按钮可 1 秒体验完整操作清单";
+  const fb = $("#fundingBox");
+  if (fb) {
+    fb.className = "pf-funding-strip";
+    fb.textContent = "填入右侧持仓后，这里会告诉你资金该从现金池出、还是直接用减仓回笼资金对冲。";
+  }
 }
 
 function updateHeroFilled(plan) {
@@ -136,16 +141,16 @@ function updateHeroFilled(plan) {
     if (hsM < 0) parts.push(`沪深300减仓 ${pct(Math.abs(hsM) * 100)}${plan.amounts ? `（约 ${money(Math.abs(plan.amounts.moveHs))}）` : ""}`);
     if (divM > 0) parts.push(`红利低波加仓 ${pct(divM * 100)}${plan.amounts ? `（约 ${money(plan.amounts.moveDiv)}）` : ""}`);
     if (divM < 0) parts.push(`红利低波减仓 ${pct(Math.abs(divM) * 100)}${plan.amounts ? `（约 ${money(Math.abs(plan.amounts.moveDiv))}）` : ""}`);
-    title = `${plan.canAct ? "今日操作清单：" : "今日预演方案（暂不下单）："}${parts.join("；")}`;
+    title = `${plan.canAct ? "今日操作：" : "今日预演（暂不下单）："}${parts.join("；")}`;
     tone = plan.moves.net > 0 ? "buy" : plan.moves.net < 0 ? "sell" : "warn";
   }
 
-  $("#actionHero").className = `pf-hero tone-${tone}`;
+  $("#actionHero").className = `hero-card tone-${tone}`;
   $("#heroEyebrow").textContent = plan.capital !== null
     ? `你的今日专属操作清单 · 权益总资金池 ${money(plan.capital)}`
     : "你的今日专属操作清单（按比例测算）";
   $("#heroTitle").textContent = title;
-  $("#heroSubtitle").textContent = plan.fundingText;
+  $("#heroSubtitle").textContent = `当前总权益 ${pct(plan.current.equity * 100)} / 现金 ${pct(plan.current.cash * 100)} → 调整后总权益 ${pct(plan.after.equity * 100)} / 现金 ${pct(plan.after.cash * 100)}`;
 
   const fmtHero = (m, amt, canAct) => {
     if (m === 0) return "保持不动（0 元）";
@@ -171,7 +176,8 @@ function renderCalculator() {
   const badge = $("#planBadge");
   if (resolved.emptyZero) {
     $("#calcResults").hidden = true;
-    $("#calcMessage").textContent = "三项金额合计需大于 0；如果还没建仓，只在「权益池可用现金」里填入准备投入的总金额即可。";
+    if ($("#planBreakdownCard")) $("#planBreakdownCard").hidden = true;
+    $("#calcMessage").textContent = "三项金额合计需大于 0；如果还没建仓，只在「可用现金」里填入准备投入的总金额即可。";
     badge.className = "pf-pill";
     badge.textContent = "等待填写";
     updateHeroUnfilled(lastData);
@@ -180,8 +186,9 @@ function renderCalculator() {
   const plan = calculatePortfolioPosition(lastData, resolved.hsPct, resolved.divPct, resolved.budget);
   if (!plan.valid) {
     $("#calcResults").hidden = true;
+    if ($("#planBreakdownCard")) $("#planBreakdownCard").hidden = true;
     $("#calcMessage").textContent = inputMode === "amount"
-      ? "请填入你的沪深300市值、红利低波市值和预留现金（没有持仓的格子可填 0 或留空），也可以直接点上方「示例」体验。"
+      ? "只填专门投这两只指数的钱与现金（没有持仓的格子可填 0 或留空），或点上方「示例」一键体验。"
       : plan.reason;
     badge.className = "pf-pill";
     badge.textContent = "等待填写";
@@ -190,9 +197,10 @@ function renderCalculator() {
   }
 
   $("#calcResults").hidden = false;
+  if ($("#planBreakdownCard")) $("#planBreakdownCard").hidden = false;
   $("#calcMessage").textContent = plan.reasons.length
     ? plan.reasons.join("；")
-    : "已按 50/50 基础预算 + 50% 平滑估值补位 + 5% 死区完成测算；单次单侧最多调整 10 个百分点。";
+    : "已按 50/50 基础预算 + 50% 平滑补位 + 5% 死区实时测算；单次单侧最多调整 10 个百分点。";
 
   const hasMove = plan.moves.hs300 !== 0 || plan.moves.h30269 !== 0;
   badge.className = `pf-pill ${plan.canAct ? (plan.moves.net >= 0 ? "buy" : "sell") : hasMove ? "warn" : ""}`;
@@ -200,23 +208,14 @@ function renderCalculator() {
 
   updateHeroFilled(plan);
 
-  $("#kpiCurEq").textContent = `${pct(plan.current.equity * 100)} 权益 / ${pct(plan.current.cash * 100)} 现金`;
-  $("#kpiCurAmt").textContent = plan.amounts
-    ? `总池 ${money(plan.capital)}（权益 ${money(plan.amounts.curHs + plan.amounts.curDiv)} · 现金 ${money(plan.amounts.curCash)}）`
-    : "留空金额时仅展示比例";
-  $("#kpiAfterEq").textContent = `${pct(plan.after.equity * 100)} 权益 / ${pct(plan.after.cash * 100)} 现金`;
-  $("#kpiAfterAmt").textContent = plan.amounts
-    ? `权益 ${money(plan.amounts.afterHs + plan.amounts.afterDiv)} · 现金 ${money(plan.amounts.afterCash)}`
-    : "总权益上限 90%，现金底线 ≥10%";
-  $("#kpiNetMove").textContent = plan.moves.net === 0
-    ? "0.0 个百分点（不动）"
-    : `${plan.moves.net > 0 ? "净投入 +" : "净回笼 -"}${pct(Math.abs(plan.moves.net) * 100)}`;
-  $("#kpiCrossNote").textContent = plan.moves.crossFunded > 0
-    ? `含跨资产直接对冲 ${pct(plan.moves.crossFunded * 100)}`
-    : plan.moves.net === 0 ? "双侧均在死区或保护区内" : "单向现金池划转";
+  if ($("#kpiNetMove")) {
+    $("#kpiNetMove").textContent = plan.moves.net === 0
+      ? "净变动 0%（不动）"
+      : `${plan.moves.net > 0 ? "净投入 +" : "净回笼 -"}${pct(Math.abs(plan.moves.net) * 100)}`;
+  }
 
-  $("#curMixText").textContent = `沪深300 ${pct(plan.current.hs300 * 100)} · 红利低波 ${pct(plan.current.h30269 * 100)} · 现金 ${pct(plan.current.cash * 100)}`;
-  $("#afterMixText").textContent = `沪深300 ${pct(plan.after.hs300 * 100)} · 红利低波 ${pct(plan.after.h30269 * 100)} · 现金 ${pct(plan.after.cash * 100)}`;
+  $("#curMixText").textContent = `300 ${pct(plan.current.hs300 * 100)} · 红利 ${pct(plan.current.h30269 * 100)} · 现金 ${pct(plan.current.cash * 100)}`;
+  $("#afterMixText").textContent = `300 ${pct(plan.after.hs300 * 100)} · 红利 ${pct(plan.after.h30269 * 100)} · 现金 ${pct(plan.after.cash * 100)}`;
   setSegment("#curBarHs", plan.current.hs300);
   setSegment("#curBarDiv", plan.current.h30269);
   setSegment("#curBarCash", plan.current.cash);
@@ -225,8 +224,10 @@ function renderCalculator() {
   setSegment("#afterBarCash", plan.after.cash);
 
   const funding = $("#fundingBox");
-  funding.textContent = plan.fundingText;
-  funding.className = `pf-funding${plan.moves.crossFunded > 0 ? " highlight" : ""}`;
+  if (funding) {
+    funding.textContent = plan.fundingText;
+    funding.className = `pf-funding-strip${plan.moves.crossFunded > 0 ? " highlight" : ""}`;
+  }
 
   const moveChip = (m, canAct) => {
     const span = document.createElement("span");
@@ -313,12 +314,12 @@ function renderBacktest(bt) {
   const silo50Cagr = bt.siloed_50_50_core50?.full?.cagr_calendar_pct ?? null;
   const silo00Cagr = bt.siloed_50_50_cash0?.full?.cagr_calendar_pct ?? null;
 
-  // 1. Clean 4-row primary summary table (easy to read at a glance!)
+  // 1. Clean 4-row primary summary table (concise labels -> zero horizontal overflow!)
   const coreList = [
-    ["★ 本页方法：统一总资金池 v1.0（互通闲置现金）", bt.unified_v1_core50, true, silo50Cagr],
-    ["旧做法：两个页面各管各的（50/50 分池不互通）", bt.siloed_50_50_core50, false, null],
-    ["只用沪深300单策略（回撤明显更大）", bt.standalone_hs300_v25, false, null],
-    ["只用红利低波单策略（稳但收益偏低）", bt.standalone_h30269_v32, false, null],
+    ["★ 统一总资金池 v1.0（推荐）", bt.unified_v1_core50, true, silo50Cagr],
+    ["分池各管各的（50/50 不互通）", bt.siloed_50_50_core50, false, null],
+    ["只用沪深300单策略", bt.standalone_hs300_v25, false, null],
+    ["只用红利低波单策略", bt.standalone_h30269_v32, false, null],
   ].filter(([, row]) => Boolean(row?.full));
 
   $("#coreBacktestRows").replaceChildren(...coreList.map(([label, row, featured, baseCagr]) => {
@@ -398,15 +399,15 @@ function render(data) {
 
   $("#asOfText").textContent = `${div.as_of || hs.as_of || "--"} · 组合 ${data.version}`;
   $("#topRegime").textContent = reg.title || "--";
-  $("#topTotalEq").textContent = `${pct((ref.total_equity ?? 0) * 100)} / 现 ${pct((ref.cash_target ?? 0) * 100)}`;
-  $("#topHsBudget").textContent = `${pct((ref.eff_hs300_budget ?? 0.5) * 100)}（上限 65%）`;
-  $("#topDivBudget").textContent = `${pct((ref.eff_h30269_budget ?? 0.5) * 100)}（上限 70%）`;
+  if ($("#topTotalEq")) $("#topTotalEq").textContent = `${pct((ref.total_equity ?? 0) * 100)} / 现 ${pct((ref.cash_target ?? 0) * 100)}`;
+  if ($("#topHsBudget")) $("#topHsBudget").textContent = `${pct((ref.eff_hs300_budget ?? 0.5) * 100)}（上限 65%）`;
+  if ($("#topDivBudget")) $("#topDivBudget").textContent = `${pct((ref.eff_h30269_budget ?? 0.5) * 100)}（上限 70%）`;
   $("#regimeMeta").textContent = `双引擎同步于 ${(data.generated_at || "").replace("T", " ")}`;
 
   $("#hsMetricPe").textContent = `${num(hs.price, 1)} / ${pct(hs.pe_percentile)}`;
   $("#hsMetricTarget").textContent = hs.agreed ? pct(hs.consensus_exposure * 100) : "分歧（HOLD）";
   $("#hsMetricErp").textContent = `${pct(hs.erp, 2)} / ${pct(hs.erp_percentile)}`;
-  $("#hsMetricStatus").textContent = hs.available ? (hs.can_decide ? "可执行" : "收盘参考") : "数据待恢复";
+  if ($("#hsMetricStatus")) $("#hsMetricStatus").textContent = hs.available ? (hs.can_decide ? "可执行" : "收盘参考") : "数据待恢复";
   $("#hsMetricFactor").textContent = pct((ref.hs300_factor ?? 0) * 100, 0);
   $("#hsFactorBar").style.width = `${(ref.hs300_factor ?? 0) * 100}%`;
   $("#hsSleeveNote").textContent = hs.available
@@ -416,7 +417,7 @@ function render(data) {
   $("#divMetricSpread").textContent = `${signedPct(div.beta_adjusted_spread_pct, 2)}（${div.relative_zone || "--"}）`;
   $("#divMetricDecision").textContent = div.decision || "--";
   $("#divMetricVal").textContent = `${pct(div.pe_percentile)} / ${div.bond_support || "--"}`;
-  $("#divMetricYield").textContent = `${pct(div.dividend_yield_pct, 2)} / ${pct(div.bond10_pct, 2)}`;
+  if ($("#divMetricYield")) $("#divMetricYield").textContent = `${pct(div.dividend_yield_pct, 2)} / ${pct(div.bond10_pct, 2)}`;
   $("#divMetricFactor").textContent = pct((ref.h30269_factor ?? 0) * 100, 0);
   $("#divFactorBar").style.width = `${(ref.h30269_factor ?? 0) * 100}%`;
   $("#divSleeveNote").textContent = div.blocked
