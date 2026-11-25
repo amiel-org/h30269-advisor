@@ -61,7 +61,7 @@ class TestPortfolioAllocator(unittest.TestCase):
         self.assertAlmostEqual(expensive_div["h30269_target"], 0.40, places=9)
 
     def test_backtest_prefix_invariance_no_lookahead(self):
-        records, _ = build_aligned_records()
+        records, _, _ = build_aligned_records()
         full = run_portfolio_backtest(records, CFG)
         cut = 1200
         sub = run_portfolio_backtest(records[:cut], CFG)

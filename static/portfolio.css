@@ -32,6 +32,71 @@
 .pf-regime-banner.tone-defense { background: #fff8e9; color: #7e5516; border-bottom-color: #ecd6aa; }
 .pf-regime-banner.tone-offense { background: #ecf8f2; color: #0b5d44; border-bottom-color: #bfe4d3; }
 
+.pf-hero {
+  padding: 22px 28px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(135deg, #f6f8f7 0%, #ffffff 100%);
+  border-left: 5px solid var(--ink-soft);
+}
+.pf-hero.tone-buy { background: linear-gradient(135deg, #fff4f5 0%, #ffffff 100%); border-left-color: var(--red); }
+.pf-hero.tone-sell { background: linear-gradient(135deg, #edf9f4 0%, #ffffff 100%); border-left-color: var(--green); }
+.pf-hero.tone-warn { background: linear-gradient(135deg, #fff9ec 0%, #ffffff 100%); border-left-color: var(--amber); }
+
+.pf-hero-eyebrow {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.pf-hero-main h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.3;
+  color: var(--ink);
+}
+.pf-hero.tone-buy .pf-hero-main h1 { color: var(--red-dark); }
+.pf-hero.tone-sell .pf-hero-main h1 { color: var(--green); }
+.pf-hero-main p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.65;
+}
+
+.pf-hero-cards {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.pf-hero-step {
+  padding: 13px 15px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pf-hero-step span { font-size: 11px; color: var(--muted); font-weight: 600; }
+.pf-hero-step strong { font-size: 15px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.pf-hero-step small { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+.pf-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pf-inputs[hidden] { display: none; }
+
+@media (max-width: 900px) {
+  .pf-hero-cards { grid-template-columns: 1fr; }
+  .pf-hero { padding: 18px 14px; }
+  .pf-hero-main h1 { font-size: 19px; }
+}
+
 .pf-stage {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 368px;

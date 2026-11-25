@@ -11,12 +11,34 @@ const money = (v) => Number.isFinite(Number(v)) ? `${num(v, 0)} 元` : "--";
 
 let lastData = null;
 let busy = false;
+let inputMode = "amount"; // default: direct RMB amount entry (much easier than mental %)
 
-for (const [id, key] of [["pfHsInput", "portfolio.hs300"], ["pfDivInput", "portfolio.h30269"], ["pfBudgetInput", "portfolio.budget"]]) {
-  try {
+try {
+  const savedMode = localStorage.getItem("portfolio.inputMode");
+  if (savedMode === "percent" || savedMode === "amount") inputMode = savedMode;
+  for (const [id, key] of [
+    ["pfHsInput", "portfolio.hs300"],
+    ["pfDivInput", "portfolio.h30269"],
+    ["pfBudgetInput", "portfolio.budget"],
+    ["pfHsAmtInput", "portfolio.hs300Amt"],
+    ["pfDivAmtInput", "portfolio.h30269Amt"],
+    ["pfCashAmtInput", "portfolio.cashAmt"],
+  ]) {
     const saved = localStorage.getItem(key);
     if (saved !== null) $(`#${id}`).value = saved;
-  } catch {}
+  }
+  // If user previously only saved percentages (from older version), switch to percent mode automatically
+  const hasAmt = $("#pfHsAmtInput").value || $("#pfDivAmtInput").value || $("#pfCashAmtInput").value;
+  const hasPct = $("#pfHsInput").value || $("#pfDivInput").value;
+  if (!hasAmt && hasPct && !savedMode) inputMode = "percent";
+} catch {}
+
+function applyInputMode(mode) {
+  inputMode = mode;
+  try { localStorage.setItem("portfolio.inputMode", mode); } catch {}
+  $$("[data-input-mode]").forEach((btn) => btn.classList.toggle("active", btn.dataset.inputMode === mode));
+  $("#amountInputs").hidden = mode !== "amount";
+  $("#percentInputs").hidden = mode !== "percent";
 }
 
 function showError(msg) {
@@ -32,22 +54,141 @@ function setSegment(selector, ratio) {
   el.textContent = p >= 11 ? `${p.toFixed(0)}%` : "";
 }
 
+function resolveInputs() {
+  if (inputMode === "percent") {
+    return {
+      hsPct: $("#pfHsInput").value,
+      divPct: $("#pfDivInput").value,
+      budget: $("#pfBudgetInput").value,
+    };
+  }
+  const hsRaw = $("#pfHsAmtInput").value.trim();
+  const divRaw = $("#pfDivAmtInput").value.trim();
+  const cashRaw = $("#pfCashAmtInput").value.trim();
+  if (!hsRaw && !divRaw && !cashRaw) {
+    return { hsPct: "", divPct: "", budget: "" };
+  }
+  const hsAmt = hsRaw ? Number(hsRaw) : 0;
+  const divAmt = divRaw ? Number(divRaw) : 0;
+  const cashAmt = cashRaw ? Number(cashRaw) : 0;
+  if (![hsAmt, divAmt, cashAmt].every((v) => Number.isFinite(v) && v >= 0)) {
+    return { hsPct: "-1", divPct: "0", budget: "" };
+  }
+  const total = hsAmt + divAmt + cashAmt;
+  if (!(total > 0)) {
+    return { hsPct: "", divPct: "", budget: "", emptyZero: true };
+  }
+  return {
+    hsPct: ((hsAmt / total) * 100).toFixed(4),
+    divPct: ((divAmt / total) * 100).toFixed(4),
+    budget: String(total),
+  };
+}
+
+function updateHeroUnfilled(data) {
+  const hs = data.sleeves?.hs300 || {};
+  const div = data.sleeves?.h30269 || {};
+  const hsBuy = hs.agreed && hs.consensus_exposure >= 0.5;
+  const divBuy = String(div.action_code || "").startsWith("buy_");
+  const divSell = String(div.action_code || "").startsWith("reduce_");
+
+  let title = "今天先按兵不动，拿住现金等机会";
+  let tone = "wait";
+  if (hsBuy && divBuy) {
+    title = "双侧均出现低估机会，建议分批加仓";
+    tone = "buy";
+  } else if (hsBuy) {
+    title = "沪深300达成加仓共识，红利低波暂不追买";
+    tone = "buy";
+  } else if (divBuy) {
+    title = "红利低波出现买点，沪深300维持观望";
+    tone = "buy";
+  } else if (divSell) {
+    title = "今天不追买；沪深300不动，红利低波可小幅落袋战术仓";
+    tone = "sell";
+  }
+
+  $("#actionHero").className = `pf-hero tone-${tone}`;
+  $("#heroEyebrow").textContent = "今日总池大方向（在下方填入你的实际金额后，会精确算出今天买/卖多少钱）";
+  $("#heroTitle").textContent = title;
+  $("#heroSubtitle").textContent = `${data.regime?.title || ""}：${data.regime?.summary || ""}`;
+
+  $("#heroHsAction").textContent = hs.agreed ? `三窗口统一目标 ${pct(hs.consensus_exposure * 100)}` : "暂不调仓（维持现仓）";
+  $("#heroHsReason").textContent = hs.agreed ? `PE分位 ${pct(hs.pe_percentile)}，按单次最多 10% 步长靠近目标` : `三窗口存在分歧（${pct((hs.window_min ?? 0) * 100)}~${pct((hs.window_max ?? 0) * 100)}）`;
+
+  $("#heroDivAction").textContent = div.decision || "持有观察";
+  $("#heroDivReason").textContent = `全收益40日Beta差 ${signedPct(div.beta_adjusted_spread_pct, 2)} · PE分位 ${pct(div.pe_percentile)}`;
+
+  $("#heroCashAction").textContent = "填入下方金额后自动计算";
+  $("#heroCashReason").textContent = "点击下方「示例」按钮可 1 秒体验完整操作清单";
+}
+
+function updateHeroFilled(plan) {
+  const hsM = plan.moves.hs300;
+  const divM = plan.moves.h30269;
+  const anyMove = hsM !== 0 || divM !== 0;
+
+  let title = "按你的实际持仓：今天保持不动，无需下单";
+  let tone = "wait";
+  if (anyMove) {
+    const parts = [];
+    if (hsM > 0) parts.push(`沪深300加仓 ${pct(hsM * 100)}${plan.amounts ? `（约 ${money(plan.amounts.moveHs)}）` : ""}`);
+    if (hsM < 0) parts.push(`沪深300减仓 ${pct(Math.abs(hsM) * 100)}${plan.amounts ? `（约 ${money(Math.abs(plan.amounts.moveHs))}）` : ""}`);
+    if (divM > 0) parts.push(`红利低波加仓 ${pct(divM * 100)}${plan.amounts ? `（约 ${money(plan.amounts.moveDiv)}）` : ""}`);
+    if (divM < 0) parts.push(`红利低波减仓 ${pct(Math.abs(divM) * 100)}${plan.amounts ? `（约 ${money(Math.abs(plan.amounts.moveDiv))}）` : ""}`);
+    title = `${plan.canAct ? "今日操作清单：" : "今日预演方案（暂不下单）："}${parts.join("；")}`;
+    tone = plan.moves.net > 0 ? "buy" : plan.moves.net < 0 ? "sell" : "warn";
+  }
+
+  $("#actionHero").className = `pf-hero tone-${tone}`;
+  $("#heroEyebrow").textContent = plan.capital !== null
+    ? `你的今日专属操作清单 · 权益总资金池 ${money(plan.capital)}`
+    : "你的今日专属操作清单（按比例测算）";
+  $("#heroTitle").textContent = title;
+  $("#heroSubtitle").textContent = plan.fundingText;
+
+  const fmtHero = (m, amt, canAct) => {
+    if (m === 0) return "保持不动（0 元）";
+    const act = m > 0 ? `买入 +${pct(m * 100)}` : `卖出 ${pct(m * 100)}`;
+    const cash = amt !== null ? ` · 约 ${money(Math.abs(amt))}` : "";
+    return `${act}${cash}${canAct ? "" : "（预演）"}`;
+  };
+  $("#heroHsAction").textContent = fmtHero(hsM, plan.amounts ? plan.amounts.moveHs : null, plan.hsCanAct);
+  $("#heroHsReason").textContent = plan.sleeveReasons.hs300;
+  $("#heroDivAction").textContent = fmtHero(divM, plan.amounts ? plan.amounts.moveDiv : null, plan.divCanAct);
+  $("#heroDivReason").textContent = plan.sleeveReasons.h30269;
+  $("#heroCashAction").textContent = plan.amounts
+    ? `调整后留存 ${pct(plan.after.cash * 100)}（约 ${money(plan.amounts.afterCash)}）`
+    : `调整后留存 ${pct(plan.after.cash * 100)}`;
+  $("#heroCashReason").textContent = plan.moves.crossFunded > 0
+    ? `含跨资产直接对冲 ${pct(plan.moves.crossFunded * 100)}，无需额外掏现金`
+    : plan.moves.net === 0 ? "现金比例无变化，安心拿稳底线" : "已自动守住 ≥10% 现金安全垫";
+}
+
 function renderCalculator() {
   if (!lastData) return;
-  const plan = calculatePortfolioPosition(
-    lastData,
-    $("#pfHsInput").value,
-    $("#pfDivInput").value,
-    $("#pfBudgetInput").value,
-  );
+  const resolved = resolveInputs();
   const badge = $("#planBadge");
-  if (!plan.valid) {
+  if (resolved.emptyZero) {
     $("#calcResults").hidden = true;
-    $("#calcMessage").textContent = plan.reason;
+    $("#calcMessage").textContent = "三项金额合计需大于 0；如果还没建仓，只在「权益池可用现金」里填入准备投入的总金额即可。";
     badge.className = "pf-pill";
     badge.textContent = "等待填写";
+    updateHeroUnfilled(lastData);
     return;
   }
+  const plan = calculatePortfolioPosition(lastData, resolved.hsPct, resolved.divPct, resolved.budget);
+  if (!plan.valid) {
+    $("#calcResults").hidden = true;
+    $("#calcMessage").textContent = inputMode === "amount"
+      ? "请填入你的沪深300市值、红利低波市值和预留现金（没有持仓的格子可填 0 或留空），也可以直接点上方「示例」体验。"
+      : plan.reason;
+    badge.className = "pf-pill";
+    badge.textContent = "等待填写";
+    updateHeroUnfilled(lastData);
+    return;
+  }
+
   $("#calcResults").hidden = false;
   $("#calcMessage").textContent = plan.reasons.length
     ? plan.reasons.join("；")
@@ -57,16 +198,18 @@ function renderCalculator() {
   badge.className = `pf-pill ${plan.canAct ? (plan.moves.net >= 0 ? "buy" : "sell") : hasMove ? "warn" : ""}`;
   badge.textContent = plan.canAct ? "可执行方案" : hasMove ? "预演参考" : "维持现仓";
 
-  $("#kpiCurEq").textContent = `${pct(plan.current.equity * 100)} / 现 ${pct(plan.current.cash * 100)}`;
+  updateHeroFilled(plan);
+
+  $("#kpiCurEq").textContent = `${pct(plan.current.equity * 100)} 权益 / ${pct(plan.current.cash * 100)} 现金`;
   $("#kpiCurAmt").textContent = plan.amounts
-    ? `权益 ${money(plan.amounts.curHs + plan.amounts.curDiv)} · 现金 ${money(plan.amounts.curCash)}`
+    ? `总池 ${money(plan.capital)}（权益 ${money(plan.amounts.curHs + plan.amounts.curDiv)} · 现金 ${money(plan.amounts.curCash)}）`
     : "留空金额时仅展示比例";
-  $("#kpiAfterEq").textContent = `${pct(plan.after.equity * 100)} / 现 ${pct(plan.after.cash * 100)}`;
+  $("#kpiAfterEq").textContent = `${pct(plan.after.equity * 100)} 权益 / ${pct(plan.after.cash * 100)} 现金`;
   $("#kpiAfterAmt").textContent = plan.amounts
     ? `权益 ${money(plan.amounts.afterHs + plan.amounts.afterDiv)} · 现金 ${money(plan.amounts.afterCash)}`
     : "总权益上限 90%，现金底线 ≥10%";
   $("#kpiNetMove").textContent = plan.moves.net === 0
-    ? "0.0 个百分点"
+    ? "0.0 个百分点（不动）"
     : `${plan.moves.net > 0 ? "净投入 +" : "净回笼 -"}${pct(Math.abs(plan.moves.net) * 100)}`;
   $("#kpiCrossNote").textContent = plan.moves.crossFunded > 0
     ? `含跨资产直接对冲 ${pct(plan.moves.crossFunded * 100)}`
@@ -147,23 +290,69 @@ function renderCalculator() {
   $("#sleeveDetailNotes").textContent = `① ${plan.sleeveReasons.hs300}  ② ${plan.sleeveReasons.h30269}`;
 }
 
+function fmtTradeFreq(trades, years) {
+  if (!Number.isFinite(trades)) return "--";
+  if (trades === 0) return "0 次（买入持有）";
+  const perYear = trades / Math.max(1, years);
+  return `约 ${num(perYear, 1)} 次/年（共 ${trades} 次）`;
+}
+
 function renderBacktest(bt) {
   if (!bt?.sample) return;
   const s = bt.sample;
+  const d0 = Date.parse(`${s.start.slice(0, 4)}-${s.start.slice(4, 6)}-${s.start.slice(6, 8)}T00:00:00Z`);
+  const d1 = Date.parse(`${s.end.slice(0, 4)}-${s.end.slice(4, 6)}-${s.end.slice(6, 8)}T00:00:00Z`);
+  const years = (d1 - d0) / (365.25 * 86400000);
+
   $("#corrStrip").innerHTML = [
-    `<span>双指数日收益相关性：<strong>${num(s.daily_return_correlation, 3)}</strong></span>`,
-    `<span>双策略独立仓位相关性：<strong>${num(s.standalone_exposure_correlation, 3)}</strong>（牛熊高度互补）</span>`,
-    `<span>样本区间：<strong>${s.start} → ${s.end}</strong>（${s.trading_days} 个交易日）</span>`,
+    `<span>回测跨度：<strong>${num(years, 1)} 年</strong>（${s.start} → ${s.end}）</span>`,
+    `<span>两套策略仓位相关性：<strong>${num(s.standalone_exposure_correlation, 3)}</strong>（牛熊天然互补）</span>`,
+    `<span>两指数日收益相关性：<strong>${num(s.daily_return_correlation, 3)}</strong></span>`,
   ].join("");
 
   const silo50Cagr = bt.siloed_50_50_core50?.full?.cagr_calendar_pct ?? null;
   const silo00Cagr = bt.siloed_50_50_cash0?.full?.cagr_calendar_pct ?? null;
 
-  const list = [
+  // 1. Clean 4-row primary summary table (easy to read at a glance!)
+  const coreList = [
+    ["★ 本页方法：统一总资金池 v1.0（互通闲置现金）", bt.unified_v1_core50, true, silo50Cagr],
+    ["旧做法：两个页面各管各的（50/50 分池不互通）", bt.siloed_50_50_core50, false, null],
+    ["只用沪深300单策略（回撤明显更大）", bt.standalone_hs300_v25, false, null],
+    ["只用红利低波单策略（稳但收益偏低）", bt.standalone_h30269_v32, false, null],
+  ].filter(([, row]) => Boolean(row?.full));
+
+  $("#coreBacktestRows").replaceChildren(...coreList.map(([label, row, featured, baseCagr]) => {
+    const tr = document.createElement("tr");
+    if (featured) tr.className = "featured";
+    const delta = baseCagr !== null ? row.full.cagr_calendar_pct - baseCagr : null;
+    const cells = [
+      label,
+      pct(row.full.cagr_calendar_pct, 2),
+      pct(row.full.max_drawdown_pct, 2),
+      `${num(row.full.calmar, 2)} / ${num(row.full.sharpe, 2)}`,
+      `${pct(row.pre_2022.cagr_calendar_pct, 2)} / ${pct(row.post_2022.cagr_calendar_pct, 2)}`,
+      fmtTradeFreq(row.trades, years),
+    ];
+    cells.forEach((text, idx) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      if (idx === 1 && delta !== null && delta > 0) {
+        const tag = document.createElement("span");
+        tag.className = "pf-delta-tag";
+        tag.textContent = `比分池 +${num(delta, 2)}%/年`;
+        td.append(tag);
+      }
+      tr.append(td);
+    });
+    return tr;
+  }));
+
+  // 2. Full 9-row table tucked neatly inside collapsible details
+  const fullList = [
     ["★ 统一总资金池 v1.0（初始50%红利底仓）", bt.unified_v1_core50, true, silo50Cagr],
-    ["分池独立 50/50（不共享现金对照）", bt.siloed_50_50_core50, false, null],
+    ["分池独立 50/50（初始50%红利底仓对照）", bt.siloed_50_50_core50, false, null],
     ["★ 统一总资金池 v1.0（初始0%纯现金起步）", bt.unified_v1_cash0, true, silo00Cagr],
-    ["分池独立 50/50（初始0%纯现金起步）", bt.siloed_50_50_cash0, false, null],
+    ["分池独立 50/50（初始0%纯现金起步对照）", bt.siloed_50_50_cash0, false, null],
     ["单策略：沪深300 v2.5（100%单池）", bt.standalone_hs300_v25, false, null],
     ["单策略：红利低波 V3.2（100%单池）", bt.standalone_h30269_v32, false, null],
     ["被动基准：50/50 静态再平衡（5%阈值）", bt.passive_50_50_rebalanced, false, null],
@@ -171,7 +360,7 @@ function renderBacktest(bt) {
     ["被动基准：100% 红利低波全收益", bt.passive_100_h30269, false, null],
   ].filter(([, row]) => Boolean(row?.full));
 
-  $("#backtestRows").replaceChildren(...list.map(([label, row, featured, baseCagr]) => {
+  $("#fullBacktestRows").replaceChildren(...fullList.map(([label, row, featured, baseCagr]) => {
     const tr = document.createElement("tr");
     if (featured) tr.className = "featured";
     const delta = baseCagr !== null ? row.full.cagr_calendar_pct - baseCagr : null;
@@ -183,7 +372,7 @@ function renderBacktest(bt) {
       num(row.full.calmar, 2),
       `${pct(row.pre_2022.cagr_calendar_pct, 2)} / ${pct(row.post_2022.cagr_calendar_pct, 2)}`,
       `${num(row.avg_hs300_pct, 1)} / ${num(row.avg_h30269_pct, 1)} / ${num(row.avg_total_equity_pct, 1)}%`,
-      `${row.trades} 次`,
+      fmtTradeFreq(row.trades, years),
     ];
     cells.forEach((text, idx) => {
       const td = document.createElement("td");
@@ -212,10 +401,6 @@ function render(data) {
   $("#topTotalEq").textContent = `${pct((ref.total_equity ?? 0) * 100)} / 现 ${pct((ref.cash_target ?? 0) * 100)}`;
   $("#topHsBudget").textContent = `${pct((ref.eff_hs300_budget ?? 0.5) * 100)}（上限 65%）`;
   $("#topDivBudget").textContent = `${pct((ref.eff_h30269_budget ?? 0.5) * 100)}（上限 70%）`;
-
-  const banner = $("#regimeBanner");
-  banner.className = `pf-regime-banner ${reg.code === "dual_defense" ? "tone-defense" : reg.code === "dual_offense" ? "tone-offense" : ""}`;
-  $("#regimeSummary").innerHTML = `<strong>${reg.title || ""}：</strong>${reg.summary || ""}`;
   $("#regimeMeta").textContent = `双引擎同步于 ${(data.generated_at || "").replace("T", " ")}`;
 
   $("#hsMetricPe").textContent = `${num(hs.price, 1)} / ${pct(hs.pe_percentile)}`;
@@ -268,7 +453,42 @@ async function load(force = false) {
 }
 
 $("#refreshButton").addEventListener("click", () => load(true));
-for (const [id, key] of [["pfHsInput", "portfolio.hs300"], ["pfDivInput", "portfolio.h30269"], ["pfBudgetInput", "portfolio.budget"]]) {
+
+$$("[data-input-mode]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const targetMode = btn.dataset.inputMode;
+    if (targetMode === inputMode) return;
+    // Sync values across modes when switching so user never loses typed numbers
+    if (targetMode === "percent") {
+      const r = resolveInputs();
+      if (r.hsPct && r.divPct && Number(r.hsPct) >= 0) {
+        $("#pfHsInput").value = Number(r.hsPct).toFixed(1);
+        $("#pfDivInput").value = Number(r.divPct).toFixed(1);
+        if (r.budget) $("#pfBudgetInput").value = r.budget;
+      }
+    } else {
+      const cap = Number($("#pfBudgetInput").value);
+      const hp = Number($("#pfHsInput").value);
+      const dp = Number($("#pfDivInput").value);
+      if (cap > 0 && Number.isFinite(hp) && Number.isFinite(dp) && hp + dp <= 100) {
+        $("#pfHsAmtInput").value = String(Math.round((cap * hp) / 100));
+        $("#pfDivAmtInput").value = String(Math.round((cap * dp) / 100));
+        $("#pfCashAmtInput").value = String(Math.max(0, Math.round((cap * (100 - hp - dp)) / 100)));
+      }
+    }
+    applyInputMode(targetMode);
+    renderCalculator();
+  });
+});
+
+for (const [id, key] of [
+  ["pfHsInput", "portfolio.hs300"],
+  ["pfDivInput", "portfolio.h30269"],
+  ["pfBudgetInput", "portfolio.budget"],
+  ["pfHsAmtInput", "portfolio.hs300Amt"],
+  ["pfDivAmtInput", "portfolio.h30269Amt"],
+  ["pfCashAmtInput", "portfolio.cashAmt"],
+]) {
   $(`#${id}`).addEventListener("input", () => {
     try { localStorage.setItem(key, $(`#${id}`).value); } catch {}
     renderCalculator();
@@ -277,16 +497,26 @@ for (const [id, key] of [["pfHsInput", "portfolio.hs300"], ["pfDivInput", "portf
 
 $$(".pf-preset-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    const [hsVal, divVal] = String(btn.dataset.preset || ",").split(",");
-    $("#pfHsInput").value = hsVal;
-    $("#pfDivInput").value = divVal;
+    const [hA, dA, cA] = String(btn.dataset.presetAmt || ",,").split(",");
+    const [hP, dP, bP] = String(btn.dataset.presetPct || ",,").split(",");
+    $("#pfHsAmtInput").value = hA;
+    $("#pfDivAmtInput").value = dA;
+    $("#pfCashAmtInput").value = cA;
+    $("#pfHsInput").value = hP;
+    $("#pfDivInput").value = dP;
+    $("#pfBudgetInput").value = bP;
     try {
-      localStorage.setItem("portfolio.hs300", hsVal);
-      localStorage.setItem("portfolio.h30269", divVal);
+      localStorage.setItem("portfolio.hs300Amt", hA);
+      localStorage.setItem("portfolio.h30269Amt", dA);
+      localStorage.setItem("portfolio.cashAmt", cA);
+      localStorage.setItem("portfolio.hs300", hP);
+      localStorage.setItem("portfolio.h30269", dP);
+      localStorage.setItem("portfolio.budget", bP);
     } catch {}
     renderCalculator();
   });
 });
 
+applyInputMode(inputMode);
 load(false);
 if (window.lucide) lucide.createIcons();

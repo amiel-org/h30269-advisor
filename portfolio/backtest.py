@@ -114,7 +114,24 @@ def build_aligned_records() -> tuple[list[dict[str, Any]], dict[str, float]]:
         "daily_return_correlation": corr(r300, rdiv),
         "standalone_exposure_correlation": corr(e300, ediv),
     }
-    return records, stats
+
+    # Exact standalone curves & true trade counts sliced to the identical overlapping window
+    first_d, last_d = common[0], common[-1]
+    hs_curve_sub = [(d, v) for d, v in hs_run.curve if first_d <= d <= last_d]
+    hs_w_sub = [w for (d, _), w in zip(hs_run.curve, hs_run.exposures) if first_d <= d <= last_d]
+    hs_trades_sub = [s for s in hs_run.steps if first_d < s.date <= last_d]
+    hs_to_sub = sum(s.traded_fraction for s in hs_trades_sub)
+
+    h_curve_sub = [(d, v) for d, v in h_run50["curve"] if first_d <= d <= last_d]
+    h_w_sub = [w for (d, _), w in zip(h_run50["curve"], h_run50["exposures"]) if first_d <= d <= last_d]
+    h_trades_sub = [t for t in h_run50["trades"] if first_d < t["date"] <= last_d]
+    h_to_sub = sum(abs(t["weight_after"] - t["weight_before"]) for t in h_trades_sub)
+
+    standalone = {
+        "hs300": summarize_portfolio(hs_curve_sub, hs_w_sub, [0.0] * len(hs_w_sub), hs_trades_sub, hs_to_sub, 0.018),
+        "h30269": summarize_portfolio(h_curve_sub, [0.0] * len(h_w_sub), h_w_sub, h_trades_sub, h_to_sub, 0.018),
+    }
+    return records, stats, standalone
 
 
 def simulate_static(records: list[dict[str, Any]], w_hs: float, w_div: float, cfg: dict[str, Any], deadband: float = 0.05) -> dict[str, Any]:
@@ -160,18 +177,15 @@ def simulate_static(records: list[dict[str, Any]], w_hs: float, w_div: float, cf
 
 def main() -> None:
     cfg = load_config()
-    records, corr_stats = build_aligned_records()
+    records, corr_stats, standalone = build_aligned_records()
 
     unified_50 = run_portfolio_backtest(records, cfg, use_h30269_key="h_exp50")
     siloed_50 = run_portfolio_backtest(records, cfg, spillover_override=0.0, no_cliff_override=False, use_h30269_key="h_exp50")
     unified_00 = run_portfolio_backtest(records, cfg, use_h30269_key="h_exp00")
     siloed_00 = run_portfolio_backtest(records, cfg, spillover_override=0.0, no_cliff_override=False, use_h30269_key="h_exp00")
 
-    # Standalone single-sleeve comparisons on exact same overlapping window
-    standalone_hs_cfg = {**cfg, "base_weights": {"hs300": 1.0, "h30269": 0.0}, "max_sleeve_weights": {"hs300": 1.0, "h30269": 0.0}, "max_total_equity": 1.0, "rebalance": {**cfg["rebalance"], "deadband": 0.005, "max_step": 1.0, "cooldown_trading_days": 1}}
-    standalone_div_cfg = {**cfg, "base_weights": {"hs300": 0.0, "h30269": 1.0}, "max_sleeve_weights": {"hs300": 0.0, "h30269": 1.0}, "max_total_equity": 1.0, "rebalance": {**cfg["rebalance"], "deadband": 0.005, "max_step": 1.0, "cooldown_trading_days": 1}}
-    standalone_hs = run_portfolio_backtest(records, standalone_hs_cfg, spillover_override=0.0, no_cliff_override=False)["summary"]
-    standalone_div = run_portfolio_backtest(records, standalone_div_cfg, spillover_override=0.0, no_cliff_override=False)["summary"]
+    standalone_hs = standalone["hs300"]
+    standalone_div = standalone["h30269"]
 
     passive_50_50 = simulate_static(records, 0.50, 0.50, cfg, deadband=0.05)
     passive_hs300 = simulate_static(records, 1.0, 0.0, cfg)

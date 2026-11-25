@@ -52,64 +52,117 @@
         </div>
       </section>
 
-      <div id="regimeBanner" class="pf-regime-banner">
-        <span id="regimeSummary">正在对齐沪深300 v2.5 与红利低波 V3.2 实时信号…</span>
-        <small id="regimeMeta">--</small>
-      </div>
+      <!-- Always-visible Hero Card: Plain-Chinese "What should I do today?" -->
+      <section id="actionHero" class="pf-hero tone-wait" aria-label="今日总池操作结论">
+        <div class="pf-hero-main">
+          <span class="pf-hero-eyebrow" id="heroEyebrow">今日需要你做什么 · 实时同步两套模型</span>
+          <h1 id="heroTitle">正在汇总沪深300与红利低波信号…</h1>
+          <p id="heroSubtitle">填入下方你的当前持仓（直接填金额或填比例均可），马上给出精确到元的今日买卖清单。</p>
+        </div>
+        <div id="heroCards" class="pf-hero-cards">
+          <div class="pf-hero-step">
+            <span>① 沪深300 今天怎么做</span>
+            <strong id="heroHsAction">读取中</strong>
+            <small id="heroHsReason">--</small>
+          </div>
+          <div class="pf-hero-step">
+            <span>② 红利低波 今天怎么做</span>
+            <strong id="heroDivAction">读取中</strong>
+            <small id="heroDivReason">--</small>
+          </div>
+          <div class="pf-hero-step">
+            <span>③ 预留现金变化</span>
+            <strong id="heroCashAction">填入持仓后显示</strong>
+            <small id="heroCashReason">总权益最高 90%，始终保留 ≥10% 现金底线</small>
+          </div>
+        </div>
+      </section>
 
       <section class="pf-stage">
         <div class="pf-workbench">
           <div class="pf-head">
             <div>
-              <span class="section-label">家庭权益总资金池 = 沪深300 + 红利低波 + 预留现金（100%分母）</span>
-              <h1>我的总资金池仓位测算</h1>
+              <span class="section-label">第一步：填入你的真实持仓（仅保存在本机浏览器）</span>
+              <h2>我的总资金池仓位测算</h2>
             </div>
-            <span id="planBadge" class="pf-pill">等待填写</span>
+            <div class="pf-head-right">
+              <div class="segmented" role="group" aria-label="输入方式切换">
+                <button type="button" class="active" data-input-mode="amount">按金额填（元）</button>
+                <button type="button" data-input-mode="percent">按比例填（%）</button>
+              </div>
+              <span id="planBadge" class="pf-pill">等待填写</span>
+            </div>
           </div>
 
           <div class="pf-presets" aria-label="快速情景预设">
-            <span>快捷试算：</span>
-            <button type="button" class="pf-preset-btn" data-preset="25,35">均衡示例 25% / 35%</button>
-            <button type="button" class="pf-preset-btn" data-preset="0,0">纯现金起步 0% / 0%</button>
-            <button type="button" class="pf-preset-btn" data-preset="45,45">高仓体检 45% / 45%</button>
-            <button type="button" class="pf-preset-btn ghost" data-preset=",">清空</button>
+            <span>点一下快速试看：</span>
+            <button type="button" class="pf-preset-btn" data-preset-amt="20000,80000,100000" data-preset-pct="10,40,200000">示例：300 2万 / 红利 8万 / 现金 10万</button>
+            <button type="button" class="pf-preset-btn" data-preset-amt="0,0,200000" data-preset-pct="0,0,200000">纯现金起步：20万</button>
+            <button type="button" class="pf-preset-btn" data-preset-amt="90000,90000,20000" data-preset-pct="45,45,200000">高仓体检：各 9万 / 现金 2万</button>
+            <button type="button" class="pf-preset-btn ghost" data-preset-amt=",," data-preset-pct=",,">清空</button>
           </div>
 
-          <div class="pf-inputs">
+          <!-- Mode A: Enter directly in RMB (default, most intuitive!) -->
+          <div id="amountInputs" class="pf-inputs">
+            <label class="pf-field">
+              <span><strong>沪深300 当前市值</strong><em>直接填金额</em></span>
+              <div class="pf-input-box">
+                <input id="pfHsAmtInput" type="number" min="0" step="any" placeholder="例如 20000" inputmode="decimal">
+                <span>元</span>
+              </div>
+            </label>
+            <label class="pf-field">
+              <span><strong>红利低波 当前市值</strong><em>直接填金额</em></span>
+              <div class="pf-input-box">
+                <input id="pfDivAmtInput" type="number" min="0" step="any" placeholder="例如 80000" inputmode="decimal">
+                <span>元</span>
+              </div>
+            </label>
+            <label class="pf-field">
+              <span><strong>权益池可用现金</strong><em>准备投这俩的钱</em></span>
+              <div class="pf-input-box">
+                <input id="pfCashAmtInput" type="number" min="0" step="any" placeholder="例如 100000" inputmode="decimal">
+                <span>元</span>
+              </div>
+            </label>
+          </div>
+
+          <!-- Mode B: Enter by percentage + optional total pool -->
+          <div id="percentInputs" class="pf-inputs" hidden>
             <label class="pf-field">
               <span><strong>沪深300现仓</strong><em>占总资金池</em></span>
               <div class="pf-input-box">
-                <input id="pfHsInput" type="number" min="0" max="100" step="0.5" placeholder="25" inputmode="decimal">
+                <input id="pfHsInput" type="number" min="0" max="100" step="0.5" placeholder="10" inputmode="decimal">
                 <span>%</span>
               </div>
             </label>
             <label class="pf-field">
               <span><strong>红利低波现仓</strong><em>占总资金池</em></span>
               <div class="pf-input-box">
-                <input id="pfDivInput" type="number" min="0" max="100" step="0.5" placeholder="35" inputmode="decimal">
+                <input id="pfDivInput" type="number" min="0" max="100" step="0.5" placeholder="40" inputmode="decimal">
                 <span>%</span>
               </div>
             </label>
             <label class="pf-field">
               <span><strong>总权益资金池</strong><em>可留空</em></span>
               <div class="pf-input-box">
-                <input id="pfBudgetInput" type="number" min="1" step="any" placeholder="500000" inputmode="decimal">
+                <input id="pfBudgetInput" type="number" min="1" step="any" placeholder="200000" inputmode="decimal">
                 <span>元</span>
               </div>
             </label>
           </div>
 
-          <p id="calcMessage" class="pf-muted">填入两项实际持仓占比后，自动计算剩余现金、平滑补位预算、5% 死区过滤后的单步调仓方案与跨资产资金流向；所有输入仅保存在本机浏览器。</p>
+          <p id="calcMessage" class="pf-muted">说明：把你专门拿来买「沪深300 + 红利低波 + 等机会现金」的钱合在一起填进上面 3 个格子（不含日常应急钱或债基），页面就会自动算出今天买/卖多少钱。</p>
 
           <div id="calcResults" hidden>
             <div class="pf-kpi-strip">
               <div>
-                <span>当前总权益 / 现金</span>
+                <span>当前总资金池与权益占比</span>
                 <strong id="kpiCurEq">--</strong>
-                <small id="kpiCurAmt">未填写资金池金额</small>
+                <small id="kpiCurAmt">--</small>
               </div>
               <div>
-                <span>建议调整后总权益 / 现金</span>
+                <span>调整后权益 / 现金占比</span>
                 <strong id="kpiAfterEq">--</strong>
                 <small id="kpiAfterAmt">--</small>
               </div>
@@ -133,7 +186,7 @@
                 </div>
               </div>
               <div class="pf-bar-row">
-                <div class="pf-bar-meta"><span>本次建议后结构</span><strong id="afterMixText">--</strong></div>
+                <div class="pf-bar-meta"><span>按今日建议调整后</span><strong id="afterMixText">--</strong></div>
                 <div class="pf-stack-wrap">
                   <div class="pf-stack">
                     <div id="afterBarHs" class="pf-seg-hs" style="width:0%"></div>
@@ -160,9 +213,9 @@
                     <th>资产分舱</th>
                     <th>当前占总池</th>
                     <th>有效预算上限</th>
-                    <th>本次建议动作</th>
+                    <th>今天建议怎么做</th>
                     <th>调整后占总池</th>
-                    <th>对应金额</th>
+                    <th>对应买卖金额</th>
                   </tr>
                 </thead>
                 <tbody id="planRows"></tbody>
@@ -175,7 +228,7 @@
 
         <aside class="pf-rail" aria-label="双引擎实时状态">
           <div class="pf-rail-title">
-            <span>双引擎协同遥测</span>
+            <span>双引擎实时依据</span>
             <strong>50 / 50 基础 + 平滑补位</strong>
           </div>
 
@@ -191,7 +244,7 @@
               <div><span>数据与窗口状态</span><strong id="hsMetricStatus">--</strong></div>
             </div>
             <div class="pf-meter-wrap">
-              <div class="pf-meter-head"><span>承接补位系数（PE≤45%满额）</span><strong id="hsMetricFactor">--</strong></div>
+              <div class="pf-meter-head"><span>可承接红利闲置预算比例</span><strong id="hsMetricFactor">--</strong></div>
               <div class="pf-meter"><i id="hsFactorBar" style="width:0%"></i></div>
             </div>
             <p id="hsSleeveNote" class="pf-sleeve-reason">--</p>
@@ -209,15 +262,15 @@
               <div><span>股息率 / 10年国债</span><strong id="divMetricYield">--</strong></div>
             </div>
             <div class="pf-meter-wrap">
-              <div class="pf-meter-head"><span>承接补位系数（PE≤70%满额）</span><strong id="divMetricFactor">--</strong></div>
+              <div class="pf-meter-head"><span>可承接300闲置预算比例</span><strong id="divMetricFactor">--</strong></div>
               <div class="pf-meter"><i id="divFactorBar" style="width:0%"></i></div>
             </div>
             <p id="divSleeveNote" class="pf-sleeve-reason">--</p>
           </div>
 
           <div class="pf-guardrails">
-            <strong>核心纪律与防误杀护栏</strong>
-            单资产上限 65%（300）/ 70%（红利），总权益硬封顶 90%。仅当估值偏离超过 5% 死区才动仓，单步最多 10 个百分点；估值温和抬升仅收窄新增补位，不强制砍掉已有持仓。
+            <strong>这个页面和单独看两个页有什么区别？</strong>
+            单独看两个页时，沪深300常年有半数现金闲置，红利低波也吃不到这笔钱。合并总池后：一边闲置时自动把一半空余预算借给估值合理的另一边（但总权益封顶 90%、单边封顶 65%/70%），既提高资金利用率，又不放大回撤。
           </div>
         </aside>
       </section>
@@ -225,28 +278,49 @@
       <section class="pf-research">
         <div class="pf-head">
           <div>
-            <span class="section-label">2017-12-29 至 2026-10-13 同口径历史检验 · 收盘出信号次日收盘成交</span>
-            <h2>统一总资金池实证回测对照</h2>
+            <span class="section-label">历史成绩单（用来验证“合池”是否有效，不是今日操作表）</span>
+            <h2>为什么要把两个池子合在一起？看 8.8 年历史对照</h2>
           </div>
+          <small id="regimeMeta" style="color:var(--muted);font-size:11px;">--</small>
         </div>
         <div id="corrStrip" class="pf-corr-strip"></div>
         <div class="pf-table-wrap">
           <table class="pf-table">
             <thead>
               <tr>
-                <th>组合方案（含年化 1.8% 现金收益、扣 0.20% ETF 费率与单边 5bp 佣金）</th>
-                <th>全样本年化</th>
+                <th>只看这 4 行核心对比（均含 1.8% 现金收益、扣 0.20% ETF 费率与 5bp 佣金）</th>
+                <th>年化收益</th>
                 <th>最大回撤</th>
-                <th>超额夏普</th>
-                <th>卡玛比率</th>
-                <th>2022前 / 2022后年化</th>
-                <th>均仓（300 / 红利 / 总）</th>
-                <th>调仓次数</th>
+                <th>收益回撤比<small style="display:block;font-weight:400">卡玛 / 夏普</small></th>
+                <th>2022前 / 后年化</th>
+                <th>年均调仓<small style="display:block;font-weight:400">（8.8年总计）</small></th>
               </tr>
             </thead>
-            <tbody id="backtestRows"></tbody>
+            <tbody id="coreBacktestRows"></tbody>
           </table>
         </div>
+
+        <details style="margin-top:16px;">
+          <summary>展开查看：全部 9 组完整回测明细（含 0% 纯现金起步、被动 50/50 及单指数满仓基准）</summary>
+          <div class="pf-table-wrap" style="margin-top:12px;">
+            <table class="pf-table">
+              <thead>
+                <tr>
+                  <th>组合方案</th>
+                  <th>年化收益</th>
+                  <th>最大回撤</th>
+                  <th>超额夏普</th>
+                  <th>卡玛比率</th>
+                  <th>2022前 / 后年化</th>
+                  <th>均仓（300 / 红利 / 总）</th>
+                  <th>年均调仓（8.8年总计）</th>
+                </tr>
+              </thead>
+              <tbody id="fullBacktestRows"></tbody>
+            </table>
+          </div>
+        </details>
+
         <details>
           <summary>展开查看：补位公式、防误杀保护与模型适用边界</summary>
           <p id="disclosuresText" class="pf-muted"></p>
